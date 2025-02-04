@@ -6,7 +6,7 @@
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
 // @grant       GM_xmlhttpRequest
-// @version     1.0.5
+// @version     1.0.6
 // @license MIT
 // ==/UserScript==
 
