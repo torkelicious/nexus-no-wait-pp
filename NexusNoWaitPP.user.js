@@ -4,7 +4,7 @@
 // @namespace   NexusNoWaitPlusPlus
 // @include     https://www.nexusmods.com/*/mods/*
 // @run-at      document-idle
-// @iconURL     https://github.com/torkelicious/nexus-no-wait-pp/blob/main/icon.png
+// @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
 // @grant       GM_xmlhttpRequest
 // @version     1.0.5
 // @license MIT
