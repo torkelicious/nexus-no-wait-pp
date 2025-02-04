@@ -8,8 +8,6 @@
 // @grant       GM_xmlhttpRequest
 // @version     1.0.5
 // @license MIT
-// @downloadURL https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.user.js
-// @updateURL https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.meta.js
 // ==/UserScript==
 
 /* jshint esversion: 6 */
