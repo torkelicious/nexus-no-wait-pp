@@ -13,7 +13,7 @@
 // @license MIT
 // ==/UserScript==
 
-/* jshint esversion: 6 */
+/* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM */
 
 (function () {
 
@@ -34,7 +34,7 @@
         try {
             const saved = GM_getValue('nexusNoWaitConfig', null);
             return saved ? JSON.parse(saved) : DEFAULT_CONFIG;
-        } catch (e) {
+        } catch (_) { // Changed from 'e' to '_' to indicate intentionally unused
             console.warn('GM storage load failed, using defaults');
             return DEFAULT_CONFIG;
         }
@@ -139,6 +139,18 @@
             }
         });
     }
+
+    // Error boundary wrapper
+    // Remove if not used elsewhere
+    // function withErrorHandling(fn) {
+    //     return async (...args) => {
+    //         try {
+    //             return await fn(...args);
+    //         } catch (err) {
+    //             logMessage(err.message, true);
+    //         }
+    //     };
+    // }
 
     // === Button State Management ===
 
@@ -378,7 +390,7 @@
             description: 'Delay before closing tab after download starts (Setting this too low may prevent download from starting!)'
         },
         debug: {
-            name: "Debug Alerts",
+            name: "⚠️ Debug Alerts",
             description: "Show all console logs as alerts, don't enable unless you know what you are doing!"
         },
         playErrorSound: {
@@ -387,24 +399,98 @@
         },
     };
 
+    // Extract UI styles
+    const STYLES = {
+        button: `
+            position:fixed;
+            bottom:20px;
+            right:20px;
+            background:#da8e35;
+            color:white;
+            padding:10px 15px;
+            border-radius:4px;
+            cursor:pointer;
+            box-shadow:0 2px 8px rgba(0,0,0,0.2);
+            z-index:9999;
+            font-family:-apple-system, system-ui, sans-serif;
+            font-size:14px;
+            transition:all 0.2s ease;
+            border:none;`,
+        modal: `
+            position:fixed;
+            top:50%;
+            left:50%;
+            transform:translate(-50%, -50%);
+            background:#2f2f2f;
+            color:#dadada;
+            padding:25px;
+            border-radius:4px;
+            box-shadow:0 2px 20px rgba(0,0,0,0.3);
+            z-index:10000;
+            min-width:300px;
+            max-width:90%;
+            max-height:90vh;
+            overflow-y:auto;
+            font-family:-apple-system, system-ui, sans-serif;`,
+        settings: `
+            margin:0 0 20px 0;
+            color:#da8e35;
+            font-size:18px;
+            font-weight:600;`,
+        section: `
+            background:#363636;
+            padding:15px;
+            border-radius:4px;
+            margin-bottom:15px;`,
+        sectionHeader: `
+            color:#da8e35;
+            margin:0 0 10px 0;
+            font-size:16px;
+            font-weight:500;`,
+        input: `
+            background:#2f2f2f;
+            border:1px solid #444;
+            color:#dadada;
+            border-radius:3px;
+            padding:5px;`,
+        btn: {
+            primary: `
+                padding:8px 15px;
+                border:none;
+                background:#da8e35;
+                color:white;
+                border-radius:3px;
+                cursor:pointer;
+                transition:all 0.2s ease;`,
+            secondary: `
+                padding:8px 15px;
+                border:1px solid #da8e35;
+                background:transparent;
+                color:#da8e35;
+                border-radius:3px;
+                cursor:pointer;
+                transition:all 0.2s ease;`,
+            advanced: `
+                padding: 4px 8px;
+                border: none;
+                background: transparent;
+                color: #666;
+                font-size: 12px;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                opacity: 0.6;
+                text-decoration: underline;
+                &:hover {
+                    opacity: 1;
+                    color: #da8e35;
+                }`
+        }
+    };
+
     function createSettingsUI() {
         const btn = document.createElement('div');
         btn.innerHTML = 'NexusNoWait++ ⚙️';
-        btn.style.cssText = `
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: #414141;
-            color: white;
-            padding: 10px 15px;
-            border-radius: 6px;
-            cursor: pointer;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-            z-index: 9999;
-            font-family: -apple-system, system-ui, sans-serif;
-            font-size: 14px;
-            transition: all 0.2s ease;
-        `;
+        btn.style.cssText = STYLES.button;
         
         btn.onmouseover = () => btn.style.transform = 'translateY(-2px)';
         btn.onmouseout = () => btn.style.transform = 'translateY(0)';
@@ -422,88 +508,69 @@
         document.body.appendChild(btn);
     }
 
+    // Simplified settings UI 
     function generateSettingsHTML() {
-        const normalBooleanSettings = Object.entries(config)
-            .filter(([key, value]) => typeof value === 'boolean' && key !== 'debug')
-            .map(([key, value]) => `
-                <div>
-                    <label title="${SETTING_UI[key].description}">
+        const normalBooleanSettings = Object.entries(SETTING_UI)
+            .filter(([key]) => typeof config[key] === 'boolean' && !['debug'].includes(key))
+            .map(([key, {name, description}]) => `
+                <div style="margin-bottom:10px;">
+                    <label title="${description}" style="display:flex;align-items:center;gap:8px;">
                         <input type="checkbox" 
-                               ${value ? 'checked' : ''} 
+                               ${config[key] ? 'checked' : ''} 
                                data-setting="${key}">
-                        ${SETTING_UI[key].name}
+                        <span>${name}</span>
                     </label>
                 </div>`).join('');
 
-        const numberSettings = Object.entries(config)
-            .filter(([_, value]) => typeof value === 'number')
-            .map(([key, value]) => `
-                <div>
-                    <label title="${SETTING_UI[key].description}">
-                        ${SETTING_UI[key].name} (ms):
+        const numberSettings = Object.entries(SETTING_UI)
+            .filter(([key]) => typeof config[key] === 'number')
+            .map(([key, {name, description}]) => `
+                <div style="margin-bottom:10px;">
+                    <label title="${description}" style="display:flex;align-items:center;justify-content:space-between;">
+                        <span>${name}:</span>
                         <input type="number" 
-                               value="${value}"
+                               value="${config[key]}"
                                min="0"
                                step="100"
                                data-setting="${key}"
-                               style="width: 100px; margin-left: 5px;">
+                               style="${STYLES.input};width:120px;">
                     </label>
                 </div>`).join('');
 
-        // Separate debug setting with improved styling
-        const debugSetting = `
-            <div style="margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px;">
-                <details style="
-                    background: #f9f9f9;
-                    padding: 8px 12px;
-                    border-radius: 4px;
-                    border: 1px solid #e0e0e0;
-                ">
-                    <summary style="
-                        color: #666;
-                        cursor: pointer;
-                        font-size: 11px;
-                        user-select: none;
-                        font-family: monospace;
-                    ">⚠️ Developer Options</summary>
-                    <div style="
-                        margin-top: 8px;
-                        padding: 8px;
-                        background: white;
-                        border-radius: 3px;
-                    ">
-                        <label title="${SETTING_UI['debug'].description}" style="
-                            font-size: 11px;
-                            color: #666;
-                            display: flex;
-                            align-items: center;
-                            gap: 6px;
-                        ">
+        // Hidden debug section
+        const advancedSection = `
+            <div id="advancedSection" style="display:none;">
+                <div style="${STYLES.section}">
+                    <h4 style="${STYLES.sectionHeader}">Advanced Settings</h4>
+                    <div style="margin-bottom:10px;">
+                        <label title="${SETTING_UI.debug.description}" style="display:flex;align-items:center;gap:8px;">
                             <input type="checkbox" 
                                    ${config.debug ? 'checked' : ''} 
                                    data-setting="debug">
-                            ${SETTING_UI['debug'].name}
+                            <span>${SETTING_UI.debug.name}</span>
                         </label>
                     </div>
-                </details>
+                </div>
             </div>`;
 
         return `
-            <h3 style="margin: 0 0 20px 0; color: #da8e35; font-size: 18px;">NexusNoWait++ Settings</h3>
-            <div style="margin-bottom: 20px;">
-                <h4 style="color: #414141; margin: 0 0 10px 0;">Features</h4>
+            <h3 style="${STYLES.settings}">NexusNoWait++ Settings</h3>
+            <div style="${STYLES.section}">
+                <h4 style="${STYLES.sectionHeader}">Features</h4>
                 ${normalBooleanSettings}
             </div>
-            <div style="margin-bottom: 20px;">
-                <h4 style="color: #414141; margin: 0 0 10px 0;">Timeouts</h4>
+            <div style="${STYLES.section}">
+                <h4 style="${STYLES.sectionHeader}">Timeouts</h4>
                 ${numberSettings}
             </div>
-            ${debugSetting}
-            <div style="margin-top: 20px; display: flex; justify-content: space-between;">
-                <button id="resetSettings" style="padding: 8px 15px; border: 1px solid #ff4444; background: white; color: #ff4444; border-radius: 4px; cursor: pointer;">Reset to Default</button>
-                <button id="closeSettings" style="padding: 8px 15px; border: none; background: #da8e35; color: white; border-radius: 4px; cursor: pointer;">Save & Close</button>
+            ${advancedSection}
+            <div style="margin-top:20px;display:flex;justify-content:center;gap:10px;">
+                <button id="resetSettings" style="${STYLES.btn.secondary}">Reset</button>
+                <button id="closeSettings" style="${STYLES.btn.primary}">Save & Close</button>
             </div>
-        `; 
+            <div style="text-align:center;margin-top:15px;opacity:0.6;">
+                <button id="toggleAdvanced" style="${STYLES.btn.advanced}">⚙️ Advanced</button>
+            </div>`;
     }
 
     let activeModal = null;
@@ -516,22 +583,7 @@
 
         settingsChanged = false;  // Reset change tracker
         const modal = document.createElement('div');
-        modal.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: white;
-            padding: 25px;
-            border-radius: 8px;
-            box-shadow: 0 2px 20px rgba(0,0,0,0.15);
-            z-index: 10000;
-            min-width: 300px;
-            max-width: 90%;
-            max-height: 90vh;
-            overflow-y: auto;
-            font-family: -apple-system, system-ui, sans-serif;
-        `;
+        modal.style.cssText = STYLES.modal;
 
         modal.innerHTML = generateSettingsHTML();
 
@@ -568,6 +620,7 @@
         modal.querySelector('#closeSettings').onclick = () => {
             modal.remove();
             activeModal = null;
+            // Only reload if settings were changed
             if (settingsChanged) {
                 location.reload();
             }
@@ -580,6 +633,14 @@
             modal.remove();
             activeModal = null;
             location.reload(); // Add reload here instead of showing modal again
+        };
+
+        // Add toggle handler for advanced section
+        modal.querySelector('#toggleAdvanced').onclick = (e) => {
+            const section = modal.querySelector('#advancedSection');
+            const isHidden = section.style.display === 'none';
+            section.style.display = isHidden ? 'block' : 'none';
+            e.target.textContent = `Advanced ${isHidden ? '▲' : '▼'}`;
         };
 
         document.body.appendChild(modal);
@@ -614,15 +675,18 @@
 
     window.nexusConfig = {
         setFeature: (name, value) => {
-            const oldDebug = config.debug;  // Store old debug state
+            const oldValue = config[name];
             Object.assign(config, { [name]: value });
             saveSettings(config);
             
-            // Reset console if debug mode was changed
-            if (oldDebug !== config.debug) {
-                location.reload();  // Reload to reset console state
-            } else {
+            // Only apply non-debug settings immediately
+            if (name !== 'debug') {
                 applySettings();
+            }
+            
+            // Mark settings as changed if value actually changed
+            if (oldValue !== value) {
+                settingsChanged = true;
             }
         },
         reset: () => {
