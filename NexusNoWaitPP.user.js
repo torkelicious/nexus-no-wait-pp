@@ -18,6 +18,18 @@
 (function () {
 
     // === Configuration ===
+    /**
+     * @typedef {Object} Config
+     * @property {boolean} autoCloseTab - Close tab after download starts
+     * @property {boolean} skipRequirements - Skip requirements popup/tab
+     * @property {boolean} showAlerts - Show errors as browser alerts
+     * @property {boolean} refreshOnError - Refresh page on error
+     * @property {number} requestTimeout - Request timeout in milliseconds
+     * @property {number} closeTabTime - Wait before closing tab in milliseconds
+     * @property {boolean} debug - Show debug messages as alerts
+     * @property {boolean} playErrorSound - Play a sound on error
+     */
+
     const DEFAULT_CONFIG = {
         autoCloseTab: true,        // Close tab after download starts
         skipRequirements: true,    // Skip requirements popup/tab
@@ -29,18 +41,64 @@
         playErrorSound: true,      // Play a sound on error
     };
 
-    // Load settings from GM storage
+    /**
+     * @typedef {Object} SettingDefinition
+     * @property {string} name - Display name of the setting
+     * @property {string} description - Tooltip description
+     */
+
+    /**
+     * @typedef {Object} UIStyles
+     * @property {string} button - Button styles
+     * @property {string} modal - Modal window styles
+     * @property {string} settings - Settings header styles
+     * @property {string} section - Section styles
+     * @property {string} sectionHeader - Section header styles
+     * @property {string} input - Input field styles
+     * @property {Object} btn - Button variant styles
+     */
+
+    // === Settings Management ===
+    /**
+     * Validates settings object against default configuration
+     * @param {Object} settings - Settings to validate
+     * @returns {Config} Validated settings object
+     */
+    function validateSettings(settings) {
+        if (!settings || typeof settings !== 'object') return {...DEFAULT_CONFIG};
+        
+        const validated = {...settings}; // Keep all existing settings
+        
+        // Only validate/override invalid values
+        for (const [key, defaultValue] of Object.entries(DEFAULT_CONFIG)) {
+            if (typeof validated[key] !== typeof defaultValue) {
+                validated[key] = defaultValue;
+            }
+        }
+        
+        return validated;
+    }
+
+    /**
+     * Loads settings from storage with validation
+     * @returns {Config} Loaded and validated settings
+     */
     function loadSettings() {
         try {
             const saved = GM_getValue('nexusNoWaitConfig', null);
-            return saved ? JSON.parse(saved) : DEFAULT_CONFIG;
-        } catch {
-            console.warn('GM storage load failed, using defaults');
-            return DEFAULT_CONFIG;
+            const parsed = saved ? JSON.parse(saved) : DEFAULT_CONFIG;
+            return validateSettings(parsed);
+        } catch (error) {
+            console.warn('GM storage load failed:', error);
+            return {...DEFAULT_CONFIG};
         }
     }
 
-    // Save settings to GM storage
+    /**
+     * Saves settings to storage
+     * @param {Config} settings - Settings to save
+     * @returns {void}
+     */
     function saveSettings(settings) {
         try {
             GM_setValue('nexusNoWaitConfig', JSON.stringify(settings));
@@ -55,6 +113,18 @@
     const errorSound = new Audio('https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/dev/errorsound.mp3');
     errorSound.load(); // Preload sound
 
+    // Simplified sound utility without throttling
+    /**
+     * Plays error sound if enabled
+     * @returns {void}
+     */
+    function playErrorSound() {
+        if (!config.playErrorSound) return;
+        errorSound.play().catch(e => {
+            console.warn("Error playing sound:", e);
+        });
+    }
+
     // === Error Handling ===
 
     /**
@@ -68,7 +138,6 @@
         if (isDebug) {
             console.log("[Nexus No Wait ++]: " + message);
             if (config.debug) {
-                playErrorSound();  // Play sound before alert
                 alert("[Nexus No Wait ++] Debug:\n" + message);
             }
             return;
@@ -83,14 +152,6 @@
         if (config.refreshOnError) {
             location.reload();
         }
-    }
-
-    // Simplified sound utility
-    function playErrorSound() {
-        if (!config.playErrorSound) return;
-        errorSound.play().catch(e => {
-            console.warn("Error playing sound:", e);
-        });
     }
 
     // === URL and Navigation Handling ===
@@ -149,7 +210,7 @@
      */
     function btnError(button, error) {
         button.style.color = "red";
-        let errorMessage = "Download failed: " + (error?.message || "Unknown error");
+        let errorMessage = "Download failed: " + (error.message);
         button.innerText = "ERROR: " + errorMessage;
         logMessage(errorMessage, true);
     }
@@ -497,6 +558,10 @@
     }
 
     // Simplified settings UI 
+    /**
+     * Creates settings UI HTML
+     * @returns {string} Generated HTML
+     */
     function generateSettingsHTML() {
         const normalBooleanSettings = Object.entries(SETTING_UI)
             .filter(([key]) => typeof config[key] === 'boolean' && !['debug'].includes(key))
@@ -525,7 +590,7 @@
                     </label>
                 </div>`).join('');
 
-        // Hidden debug section
+        // debug section
         const advancedSection = `
             <div id="advancedSection" style="display:none;">
                 <div style="${STYLES.section}">
@@ -564,6 +629,10 @@
     let activeModal = null;
     let settingsChanged = false;  // Track if settings were changed
 
+    /**
+     * Shows settings modal and handles interactions
+     * @returns {void}
+     */
     function showSettingsModal() {
         if (activeModal) {
             activeModal.remove();
@@ -623,7 +692,7 @@
             location.reload(); // Add reload here instead of showing modal again
         };
 
-        // Add toggle handler for advanced section
+        // toggle handler for advanced section
         modal.querySelector('#toggleAdvanced').onclick = (e) => {
             const section = modal.querySelector('#advancedSection');
             const isHidden = section.style.display === 'none';
@@ -661,10 +730,20 @@
         }
     }
 
+    // === Global Configuration Interface ===
+    /**
+     * Global configuration interface
+     * @namespace
+     */
     window.nexusConfig = {
+        /**
+         * Sets a feature setting
+         * @param {string} name - Setting name
+         * @param {any} value - Setting value
+         */
         setFeature: (name, value) => {
             const oldValue = config[name];
-            Object.assign(config, { [name]: value });
+            config[name] = value; // Direct assignment instead of Object.assign
             saveSettings(config);
             
             // Only apply non-debug settings immediately
@@ -677,12 +756,21 @@
                 settingsChanged = true;
             }
         },
+        
+        /**
+         * Resets all settings to defaults
+         */
         reset: () => {
             GM_deleteValue('nexusNoWaitConfig');
             Object.assign(config, DEFAULT_CONFIG);
             saveSettings(config);
             applySettings();  // Apply changes immediately
         },
+        
+        /**
+         * Gets current configuration
+         * @returns {Config} Current configuration
+         */
         getConfig: () => config
     };
 
@@ -700,11 +788,19 @@
 // ------------------------------------------------------------------------------------------------ //
 
     // ===  Initialization ===
+    /**
+     * Initializes UI components
+     * @returns {void}
+     */
     function initializeUI() {
         applySettings();
         createSettingsUI();
     }
 
+    /**
+     * Initializes main functionality
+     * @returns {void}
+     */
     function initMainFunctions() {
         archivedFile();
         addClickListeners(document.querySelectorAll("a.btn"));
