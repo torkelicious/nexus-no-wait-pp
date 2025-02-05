@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name        Nexus No Wait ++
+// @name        Nexus No Wait ++ (Dev)
 // @description Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
 // @include     https://www.nexusmods.com/*/mods/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
 // @grant       GM_xmlhttpRequest
-// @version     1.0.6
+// @version     1.0.7
 // @license MIT
 // ==/UserScript==
 
