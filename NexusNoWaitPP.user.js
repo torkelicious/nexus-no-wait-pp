@@ -210,7 +210,6 @@
         observer.observe(document.body, { childList: true, subtree: true });
     }
 
-
     function archivedFile() {
         if (/[?&]category=archived/.test(window.location.href)) {
             const fileIds = document.getElementsByClassName("file-expander-header");
@@ -232,7 +231,6 @@
     addClickListeners(document.querySelectorAll("a.btn"));
     autoStartFileLink();
     autoClickRequiredFileDownload();
-
 
     let observer = new MutationObserver(((mutations, observer) => {
         for (let i = 0; i < mutations.length; i++) {
