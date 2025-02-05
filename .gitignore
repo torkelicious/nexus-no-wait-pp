@@ -134,3 +134,8 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# custom Eslint etc
+eslint.config.mjs
+package-lock.json
+package.json
