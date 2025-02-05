@@ -24,7 +24,8 @@
         showAlerts: true,          // Show errors as browser alerts
         refreshOnError: false,     // Refresh page on error
         requestTimeout: 30000,     // Request timeout (30 sec)
-        closeTabTime: 1000         // Wait before closing tab (1 sec)
+        closeTabTime: 1000,        // Wait before closing tab (1 sec)
+        debug: false,              // Show debug messages as alerts
     };
 
     // Load settings from GM storage
@@ -42,7 +43,7 @@
     function saveSettings(settings) {
         try {
             GM_setValue('nexusNoWaitConfig', JSON.stringify(settings));
-            console.log('Settings saved to GM storage');
+            errorHandler('Settings saved to GM storage', false, true);
         } catch (e) {
             console.error('Failed to save settings:', e);
         }
@@ -55,9 +56,18 @@
      * Centralized error handling function
      * @param {string} message - Error message to display/log
      * @param {boolean} [showAlert=false] - If true, shows browser alert
+     * @param {boolean} [isDebug=false] - If true, handles debug logs
      * @returns {void}
      */
-    function errorHandler(message, showAlert = false) {
+    function errorHandler(message, showAlert = false, isDebug = false) {
+        if (isDebug) {
+            console.log("[Nexus No Wait ++]: " + message);
+            if (config.debug) {
+                alert("[Nexus No Wait ++] Debug:\n" + message);
+            }
+            return;
+        }
+
         console.error("[Nexus No Wait ++]: " + message);
         if (showAlert && config.showAlerts) {
             alert("[Nexus No Wait ++] \n" + message);
@@ -155,13 +165,13 @@
     function btnSuccess(button) {
         button.style.color = "green";
         button.innerText = "Downloading!";
-        console.log("Download started.");
+        errorHandler("Download started.", false, true);
     }
 
     function btnWait(button) {
         button.style.color = "yellow";
         button.innerText = "Wait...";
-        console.log("Loading...");
+        errorHandler("Loading...", false, true);
     }
 
 
@@ -365,7 +375,11 @@
         closeTabTime: {
             name: 'Auto-Close tab Delay',
             description: 'Delay before closing tab after download starts (Setting this too low may prevent download from starting!)'
-        }
+        },
+        debug: {
+            name: "Debug Mode (Only enable for development purposes)",
+            description: "Show all console logs as alerts (Warning: Many popups!), don't enable unless you know what you are doing!"
+        },
     };
 
     function createSettingsUI() {
