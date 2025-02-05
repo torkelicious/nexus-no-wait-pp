@@ -407,7 +407,9 @@
             if (activeModal) {
                 activeModal.remove();
                 activeModal = null;
-                location.reload();
+                if (settingsChanged) {  // Only reload if settings were changed
+                    location.reload();
+                }
             } else {
                 showSettingsModal();
             }
@@ -579,11 +581,44 @@
         activeModal = modal;
     }
 
+    // Override console methods when debug is enabled
+    function setupDebugMode() {
+        if (config.debug) {
+            const originalConsole = {
+                log: console.log,
+                warn: console.warn,
+                error: console.error
+            };
+
+            console.log = function() {
+                originalConsole.log.apply(console, arguments);
+                alert("[Debug Log]\n" + Array.from(arguments).join(' '));
+            };
+
+            console.warn = function() {
+                originalConsole.warn.apply(console, arguments);
+                alert("[Debug Warn]\n" + Array.from(arguments).join(' '));
+            };
+
+            console.error = function() {
+                originalConsole.error.apply(console, arguments);
+                alert("[Debug Error]\n" + Array.from(arguments).join(' '));
+            };
+        }
+    }
+
     window.nexusConfig = {
         setFeature: (name, value) => {
+            const oldDebug = config.debug;  // Store old debug state
             Object.assign(config, { [name]: value });
             saveSettings(config);
-            applySettings();  // Apply changes immediately
+            
+            // Reset console if debug mode was changed
+            if (oldDebug !== config.debug) {
+                location.reload();  // Reload to reset console state
+            } else {
+                applySettings();
+            }
         },
         reset: () => {
             GM_deleteValue('nexusNoWaitConfig');
@@ -599,6 +634,7 @@
         if (ajaxRequestRaw) {
             ajaxRequestRaw.timeout = config.requestTimeout;
         }
+        setupDebugMode();  // Setup debug console overrides
     }
     // UI Initialization
     applySettings();
