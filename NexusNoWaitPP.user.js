@@ -119,48 +119,25 @@
             logMessage("AJAX functionality not available", true);
             return;
         }
-
-        if (!obj.url || !obj.type) {
-            logMessage("Missing required parameters for AJAX request", true);
-            return;
-        }
-
-        const requestObj = {
-            url: obj.url,
+        ajaxRequestRaw({
             method: obj.type,
+            url: obj.url,
             data: obj.data,
             headers: obj.headers,
-            timeout: config.requestTimeout,
-            ontimeout: () => {
-                logMessage("Request timed out", true);
-            },
-            onload: (result) => {
-                if (!result) {
-                    return obj.error("No response received");
+            onload: function(response) {
+                if (response.status >= 200 && response.status < 300) {
+                    obj.success(response.responseText);
+                } else {
+                    obj.error(response);
                 }
-
-                if (result.status !== 200) {
-                    let errorMsg = result.responseText || `HTTP Error ${result.status}`;
-                    return obj.error({
-                        status: result.status,
-                        message: errorMsg,
-                        responseText: result.responseText
-                    });
-                }
-
-                return obj.success(result.responseText);
             },
-            onerror: (result) => {
-                let errorMsg = result.responseText || `HTTP Error ${result.status}`;
-                return obj.error({
-                    status: result.status,
-                    message: errorMsg,
-                    responseText: result.responseText
-                });
+            onerror: function(response) {
+                obj.error(response);
+            },
+            ontimeout: function(response) {
+                obj.error(response);
             }
-        };
-
-        ajaxRequestRaw(requestObj);
+        });
     }
 
     // === Button State Management ===
@@ -334,14 +311,11 @@
             const downloadButton = document.querySelector(".popup-mod-requirements a.btn");
             if (downloadButton) {
                 downloadButton.click();
-                // Instead of disconnecting, just wait for the popup to disappear
-                setTimeout(() => {
-                    const popup = document.querySelector(".popup-mod-requirements");
-                    if (!popup) {
-                        // Popup is gone, ready for next appearance
-                        logMessage("Popup closed, ready for next download", false, true);
-                    }
-                }, 500);
+                const popup = document.querySelector(".popup-mod-requirements");
+                if (!popup) {
+                    // Popup is gone, ready for next appearance
+                    logMessage("Popup closed", false, true);
+                }
             }
         });
 
