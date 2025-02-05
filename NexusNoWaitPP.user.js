@@ -34,7 +34,7 @@
         try {
             const saved = GM_getValue('nexusNoWaitConfig', null);
             return saved ? JSON.parse(saved) : DEFAULT_CONFIG;
-        } catch (_) { // Changed from 'e' to '_' to indicate intentionally unused
+        } catch {
             console.warn('GM storage load failed, using defaults');
             return DEFAULT_CONFIG;
         }
@@ -139,18 +139,6 @@
             }
         });
     }
-
-    // Error boundary wrapper
-    // Remove if not used elsewhere
-    // function withErrorHandling(fn) {
-    //     return async (...args) => {
-    //         try {
-    //             return await fn(...args);
-    //         } catch (err) {
-    //             logMessage(err.message, true);
-    //         }
-    //     };
-    // }
 
     // === Button State Management ===
 
@@ -405,7 +393,7 @@
             position:fixed;
             bottom:20px;
             right:20px;
-            background:#da8e35;
+            background:#2f2f2f;
             color:white;
             padding:10px 15px;
             border-radius:4px;
@@ -560,7 +548,7 @@
                 ${normalBooleanSettings}
             </div>
             <div style="${STYLES.section}">
-                <h4 style="${STYLES.sectionHeader}">Timeouts</h4>
+                <h4 style="${STYLES.sectionHeader}">Timing</h4>
                 ${numberSettings}
             </div>
             ${advancedSection}
@@ -568,7 +556,7 @@
                 <button id="resetSettings" style="${STYLES.btn.secondary}">Reset</button>
                 <button id="closeSettings" style="${STYLES.btn.primary}">Save & Close</button>
             </div>
-            <div style="text-align:center;margin-top:15px;opacity:0.6;">
+            <div style="text-align: center; margin-top: 15px;">
                 <button id="toggleAdvanced" style="${STYLES.btn.advanced}">⚙️ Advanced</button>
             </div>`;
     }
