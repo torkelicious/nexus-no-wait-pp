@@ -340,11 +340,23 @@
             const downloadButton = document.querySelector(".popup-mod-requirements a.btn");
             if (downloadButton) {
                 downloadButton.click();
-                observer.disconnect();
+                // Instead of disconnecting, just wait for the popup to disappear
+                setTimeout(() => {
+                    const popup = document.querySelector(".popup-mod-requirements");
+                    if (!popup) {
+                        // Popup is gone, ready for next appearance
+                        logMessage("Popup closed, ready for next download", false, true);
+                    }
+                }, 500);
             }
         });
 
-        observer.observe(document.body, { childList: true, subtree: true });
+        observer.observe(document.body, { 
+            childList: true, 
+            subtree: true,
+            attributes: true, // Also watch for attribute changes
+            attributeFilter: ['style', 'class'] // Specifically watch style and class changes
+        });
     }
 
     // === Archived Files Handling ===
