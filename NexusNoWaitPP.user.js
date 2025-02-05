@@ -370,20 +370,25 @@
 
     function createSettingsUI() {
         const btn = document.createElement('div');
-        btn.innerHTML = '⚙️ NexusNoWait++';
+        btn.innerHTML = 'NexusNoWait++ ⚙️';
         btn.style.cssText = `
             position: fixed;
             bottom: 20px;
             right: 20px;
-            background: #fff;
-            padding: 8px 12px;
-            border-radius: 4px;
+            background: #414141;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 6px;
             cursor: pointer;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
             z-index: 9999;
             font-family: -apple-system, system-ui, sans-serif;
+            font-size: 14px;
+            transition: all 0.2s ease;
         `;
         
+        btn.onmouseover = () => btn.style.transform = 'translateY(-2px)';
+        btn.onmouseout = () => btn.style.transform = 'translateY(0)';
         btn.onclick = showSettingsModal;
         document.body.appendChild(btn);
     }
@@ -417,18 +422,18 @@
                 </div>`).join('');
 
         return `
-            <h3>NexusNoWait Settings</h3>
-            <div style="margin-bottom: 15px;">
-                <h4>Features</h4>
+            <h3 style="margin: 0 0 20px 0; color: #da8e35; font-size: 18px;">NexusNoWait++ Settings</h3>
+            <div style="margin-bottom: 20px;">
+                <h4 style="color: #414141; margin: 0 0 10px 0;">Features</h4>
                 ${booleanSettings}
             </div>
-            <div style="margin-bottom: 15px;">
-                <h4>Timeouts</h4>
+            <div style="margin-bottom: 20px;">
+                <h4 style="color: #414141; margin: 0 0 10px 0;">Timeouts</h4>
                 ${numberSettings}
             </div>
-            <div style="margin-top: 15px; display: flex; justify-content: space-between;">
-                <button id="resetSettings" style="color: red;">Reset to Default</button>
-                <button id="closeSettings">Close & Reload</button>
+            <div style="margin-top: 20px; display: flex; justify-content: space-between;">
+                <button id="resetSettings" style="padding: 8px 15px; border: 1px solid #ff4444; background: white; color: #ff4444; border-radius: 4px; cursor: pointer;">Reset to Default</button>
+                <button id="closeSettings" style="padding: 8px 15px; border: none; background: #da8e35; color: white; border-radius: 4px; cursor: pointer;">Save & Close</button>
             </div>
         `; 
     }
@@ -447,10 +452,15 @@
             left: 50%;
             transform: translate(-50%, -50%);
             background: white;
-            padding: 20px;
+            padding: 25px;
             border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 20px rgba(0,0,0,0.15);
             z-index: 10000;
+            min-width: 300px;
+            max-width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            font-family: -apple-system, system-ui, sans-serif;
         `;
 
         modal.innerHTML = generateSettingsHTML();
@@ -527,16 +537,47 @@
 // ------------------------------------------------------------------------------------------------ //
 
     // ===  Initialization ===
-    archivedFile();
-    addClickListeners(document.querySelectorAll("a.btn"));
-    autoStartFileLink();
-    if (config.skipRequirements)
-    {
-    autoClickRequiredFileDownload();
+    function initializeUI() {
+        applySettings();
+        createSettingsUI();
     }
 
+    function initMainFunctions() {
+        archivedFile();
+        addClickListeners(document.querySelectorAll("a.btn"));
+        autoStartFileLink();
+        if (config.skipRequirements) {
+            autoClickRequiredFileDownload();
+        }
+    }
 
-     // Observer to handle download buttons
+    // button observer 
+    const buttonObserver = new MutationObserver((mutations) => {
+        try {
+            mutations.forEach(mutation => {
+                if (!mutation.addedNodes) return;
+                
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType !== Node.ELEMENT_NODE) return;
+                    
+                    if (node.matches("a.btn")) {
+                        addClickListener(node);
+                    } else {
+                        addClickListeners(node.querySelectorAll("a.btn"));
+                    }
+                });
+            });
+        } catch (error) {
+            console.error("Error in button observer:", error);
+        }
+    });
+
+    // Initialize everything
+    initializeUI();
+    initMainFunctions();
+    buttonObserver.observe(document, {childList: true, subtree: true});
+
+    // Observer to handle download buttons
     let observer = new MutationObserver(((mutations, observer) => {
         for (let i = 0; i < mutations.length; i++) {
             if (mutations[i].addedNodes) {
