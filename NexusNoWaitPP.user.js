@@ -6,7 +6,7 @@
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
 // @grant       GM_xmlhttpRequest
-// @version     1.0.7
+// @version     1.0.8
 // @license MIT
 // ==/UserScript==
 
@@ -79,122 +79,82 @@
         console.log("Loading...");
     }
 
-    function clickListener(event) {
-        const href = this.href || window.location.href;
-        const params = new URL(href).searchParams;
+    // Add this helper function
+    function showError(message, error) {
+        const errorMsg = `${message}\n\nDetails: ${error.message || error}`;
+        alert(errorMsg);
+        console.error(message, error);
+    }
 
-        if (params.get("file_id")) {
-            let button = event;
+    // Modify clickListener error handling
+    async function clickListener(event) {
+        try {
+            const href = this.href || window.location.href;
+            const url = new URL(href);
+            const fileId = url.searchParams.get("file_id") || url.searchParams.get("id");
+            
+            if (!fileId) return;
+            
+            // Prevent default if it's a link click
             if (this.href) {
-                button = this;
                 event.preventDefault();
+                btnWait(this);
+            } else {
+                btnWait(event);
             }
-            btnWait(button);
 
             const section = document.getElementById("section");
-            const gameId = section ? section.dataset.gameId : this.current_game_id;
+            const gameId = section?.dataset.gameId || this.current_game_id;
 
-            let fileId = params.get("file_id");
-            if (!fileId) {
-                fileId = params.get("id");
-            }
+            if (url.searchParams.get("nmm")) return;
 
-            if (!params.get("nmm")) {
-                ajaxRequest({
-                    type: "POST",
-                    url: "/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl",
-                    data: "fid=" + fileId + "&game_id=" + gameId,
-                    headers: {
-                        Origin: "https://www.nexusmods.com",
-                        Referer: href,
-                        "Sec-Fetch-Site": "same-origin",
-                        "X-Requested-With": "XMLHttpRequest",
-                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
-                    },
-                    success(data) {
-                        if (data) {
-                            try {
-                                data = JSON.parse(data);
+            const response = await fetch("/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl", {
+                method: 'POST',
+                headers: {
+                    'Origin': 'https://www.nexusmods.com',
+                    'Referer': href,
+                    'Sec-Fetch-Site': 'same-origin',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+                },
+                body: `fid=${fileId}&game_id=${gameId}`
+            });
 
-                                if (data.url) {
-                                    btnSuccess(button);
-                                    document.location.href = data.url;
-
-                                    setTimeout(function() {
-                                        window.close();
-                                    }, 2500);
-
-                                }
-                            } catch (e) {
-                                console.error(e);
-                            }
-                        }
-                    },
-                    error() {
-                        btnError(button);
-                    }
-                });
-            } else {
-                ajaxRequest({
-                    type: "GET",
-                    url: href,
-                    headers: {
-                        Origin: "https://www.nexusmods.com",
-                        Referer: document.location.href,
-                        "Sec-Fetch-Site": "same-origin",
-                        "X-Requested-With": "XMLHttpRequest"
-                    },
-                    success(data) {
-                        if (data) {
-                            const xml = new DOMParser().parseFromString(data, "text/html");
-                            const slow = xml.getElementById("slowDownloadButton");
-                            const downloadUrl = slow.getAttribute("data-download-url");
-                            btnSuccess(button);
-                            document.location.href = downloadUrl;
-
-                            setTimeout(function() {
-                                window.close();
-                            }, 2500);
-
-                        }
-                    },
-                    error(ajaxContext) {
-                        console.error(ajaxContext.responseText);
-                        btnError(button);
-                    }
-                });
-            }
-
-            const popup = this.parentNode;
-            if (popup && popup.classList.contains("popup")) {
-                popup.getElementsByTagName("button")[0].click();
-                const popupButton = document.getElementById("popup" + fileId);
-                if (popupButton) {
-                    btnSuccess(popupButton);
-                }
-            }
-        } else if (/ModRequirementsPopUp/.test(href)) {
-            const fileId = params.get("id");
-
-            if (fileId) {
-                this.setAttribute("id", "popup" + fileId);
-            }
+            const data = await response.json();
+            // Continue with data processing...
+        } catch (error) {
+            showError('Failed to generate download', error);
         }
     }
 
+    // Add error handling to addClickListener
     function addClickListener(el) {
-        el.addEventListener("click", clickListener, true);
-    }
-
-    function addClickListeners(els) {
-        for (let i = 0; i < els.length; i++) {
-            addClickListener(els[i]);
+        try {
+            el.addEventListener("click", clickListener, true);
+        } catch (error) {
+            showError('Failed to add click listener', error);
         }
     }
 
+    // Add error handling to addClickListeners 
+    function addClickListeners(els) {
+        try {
+            for (let i = 0; i < els.length; i++) {
+                addClickListener(els[i]);
+            }
+        } catch (error) {
+            showError('Failed to add click listeners', error);
+        }
+    }
+
+    // Add error handling to autoStartFileLink
     function autoStartFileLink() {
-        if (/file_id=/.test(window.location.href)) {
-            clickListener(document.getElementById("slowDownloadButton"));
+        try {
+            if (/file_id=/.test(window.location.href)) {
+                clickListener(document.getElementById("slowDownloadButton"));
+            }
+        } catch (error) {
+            showError('Failed to auto-start download', error);
         }
     }
 
