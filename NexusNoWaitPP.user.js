@@ -694,47 +694,41 @@
         }
     }
 
-    // button observer 
-    const buttonObserver = new MutationObserver((mutations) => {
+    // Combined observer
+    const mainObserver = new MutationObserver((mutations) => {
         try {
             mutations.forEach(mutation => {
                 if (!mutation.addedNodes) return;
                 
                 mutation.addedNodes.forEach(node => {
-                    if (node.nodeType !== Node.ELEMENT_NODE) return;
-                    
-                    if (node.matches("a.btn")) {
+                    // Handle direct button matches
+                    if (node.tagName === "A" && node.classList?.contains("btn")) {
                         addClickListener(node);
-                    } else {
+                    }
+                    
+                    // Handle nested buttons
+                    if (node.querySelectorAll) {
                         addClickListeners(node.querySelectorAll("a.btn"));
                     }
                 });
             });
         } catch (error) {
-            console.error("Error in button observer:", error);
+            console.error("Error in mutation observer:", error);
         }
     });
 
     // Initialize everything
     initializeUI();
     initMainFunctions();
-    buttonObserver.observe(document, {childList: true, subtree: true});
+    
+    // Start observing with combined configuration
+    mainObserver.observe(document, {
+        childList: true, 
+        subtree: true
+    });
 
-    // Observer to handle download buttons
-    let observer = new MutationObserver(((mutations, observer) => {
-        for (let i = 0; i < mutations.length; i++) {
-            if (mutations[i].addedNodes) {
-                for (let x = 0; x < mutations[i].addedNodes.length; x++) {
-                    const node = mutations[i].addedNodes[x];
-
-                    if (node.tagName === "A" && node.classList.contains("btn")) {
-                        addClickListener(node);
-                    } else if (node.children && node.children.length > 0) {
-                        addClickListeners(node.querySelectorAll("a.btn"));
-                    }
-                }
-            }
-        }
-    }));
-    observer.observe(document, {childList: true, subtree: true});
+    // Cleanup on page unload
+    window.addEventListener('unload', () => {
+        mainObserver.disconnect();
+    });
 })();
