@@ -393,21 +393,45 @@
     // Modifies download links for archived files
     // Adds both manual and mod manager download options to archived files
     function archivedFile() {
-        if (/[?&]category=archived/.test(window.location.href)) {
-            const fileIds = document.getElementsByClassName("file-expander-header");
-            const elements = document.getElementsByClassName("accordion-downloads");
-            const path = `${location.protocol}//${location.host}${location.pathname}`;
-            
-            for (let i = 0; i < elements.length; i++) {
-                elements[i].innerHTML = ''
-                    + `<li><a class="btn inline-flex" href="${path}?tab=files&amp;file_id=${fileIds[i].getAttribute("data-id")}&amp;nmm=1" tabindex="0">`
-                    + "<svg title=\"\" class=\"icon icon-nmm\"><use xlink:href=\"https://www.nexusmods.com/assets/images/icons/icons.svg#icon-nmm\"></use></svg> <span class=\"flex-label\">Mod manager download</span>"
-                    + "</a></li>"
-                    + `<li><a class="btn inline-flex" href="${path}?tab=files&amp;file_id=${fileIds[i].getAttribute("data-id")}" tabindex="0">`
-                    + "<svg title=\"\" class=\"icon icon-manual\"><use xlink:href=\"https://www.nexusmods.com/assets/images/icons/icons.svg#icon-manual\"></use></svg> <span class=\"flex-label\">Manual download</span>"
-                    + "</a></li>";
-            }
+        // Only run if we're in the archived category
+        if (!window.location.href.includes('category=archived')) {
+            return;
         }
+    
+        // Cache DOM queries and path
+        const path = `${location.protocol}//${location.host}${location.pathname}`;
+        const downloadTemplate = (fileId) => `
+            <li>
+                <a class="btn inline-flex" href="${path}?tab=files&file_id=${fileId}&nmm=1" tabindex="0">
+                    <svg title="" class="icon icon-nmm">
+                        <use xlink:href="https://www.nexusmods.com/assets/images/icons/icons.svg#icon-nmm"></use>
+                    </svg>
+                    <span class="flex-label">Mod manager download</span>
+                </a>
+            </li>
+            <li>
+                <a class="btn inline-flex" href="${path}?tab=files&file_id=${fileId}" tabindex="0">
+                    <svg title="" class="icon icon-manual">
+                        <use xlink:href="https://www.nexusmods.com/assets/images/icons/icons.svg#icon-manual"></use>
+                    </svg>
+                    <span class="flex-label">Manual download</span>
+                </a>
+            </li>`;
+    
+        // Use more specific selectors and modern array methods
+        const downloadSections = Array.from(document.querySelectorAll('.accordion-downloads'));
+        const fileHeaders = Array.from(document.querySelectorAll('.file-expander-header'));
+    
+        // Update downloads in a single pass
+        downloadSections.forEach((section, index) => {
+            const fileId = fileHeaders[index]?.getAttribute('data-id');
+            if (fileId) {
+                section.innerHTML = downloadTemplate(fileId);
+            }
+        });
+    
+        // Add click listeners to new buttons
+        addClickListeners(document.querySelectorAll('.accordion-downloads .btn'));
     }
 
 
