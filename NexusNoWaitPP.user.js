@@ -377,8 +377,8 @@
             description: 'Delay before closing tab after download starts (Setting this too low may prevent download from starting!)'
         },
         debug: {
-            name: "Debug Mode (Only enable for development purposes)",
-            description: "Show all console logs as alerts (Warning: Many popups!), don't enable unless you know what you are doing!"
+            name: "Debug Alerts",
+            description: "Show all console logs as alerts, don't enable unless you know what you are doing!"
         },
     };
 
@@ -403,13 +403,21 @@
         
         btn.onmouseover = () => btn.style.transform = 'translateY(-2px)';
         btn.onmouseout = () => btn.style.transform = 'translateY(0)';
-        btn.onclick = showSettingsModal;
+        btn.onclick = () => {
+            if (activeModal) {
+                activeModal.remove();
+                activeModal = null;
+                location.reload();
+            } else {
+                showSettingsModal();
+            }
+        };
         document.body.appendChild(btn);
     }
 
     function generateSettingsHTML() {
-        const booleanSettings = Object.entries(config)
-            .filter(([_, value]) => typeof value === 'boolean')
+        const normalBooleanSettings = Object.entries(config)
+            .filter(([key, value]) => typeof value === 'boolean' && key !== 'debug')
             .map(([key, value]) => `
                 <div>
                     <label title="${SETTING_UI[key].description}">
@@ -435,16 +443,55 @@
                     </label>
                 </div>`).join('');
 
+        // Separate debug setting with improved styling
+        const debugSetting = `
+            <div style="margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px;">
+                <details style="
+                    background: #f9f9f9;
+                    padding: 8px 12px;
+                    border-radius: 4px;
+                    border: 1px solid #e0e0e0;
+                ">
+                    <summary style="
+                        color: #666;
+                        cursor: pointer;
+                        font-size: 11px;
+                        user-select: none;
+                        font-family: monospace;
+                    ">⚠️ Developer Options</summary>
+                    <div style="
+                        margin-top: 8px;
+                        padding: 8px;
+                        background: white;
+                        border-radius: 3px;
+                    ">
+                        <label title="${SETTING_UI['debug'].description}" style="
+                            font-size: 11px;
+                            color: #666;
+                            display: flex;
+                            align-items: center;
+                            gap: 6px;
+                        ">
+                            <input type="checkbox" 
+                                   ${config.debug ? 'checked' : ''} 
+                                   data-setting="debug">
+                            ${SETTING_UI['debug'].name}
+                        </label>
+                    </div>
+                </details>
+            </div>`;
+
         return `
             <h3 style="margin: 0 0 20px 0; color: #da8e35; font-size: 18px;">NexusNoWait++ Settings</h3>
             <div style="margin-bottom: 20px;">
                 <h4 style="color: #414141; margin: 0 0 10px 0;">Features</h4>
-                ${booleanSettings}
+                ${normalBooleanSettings}
             </div>
             <div style="margin-bottom: 20px;">
                 <h4 style="color: #414141; margin: 0 0 10px 0;">Timeouts</h4>
                 ${numberSettings}
             </div>
+            ${debugSetting}
             <div style="margin-top: 20px; display: flex; justify-content: space-between;">
                 <button id="resetSettings" style="padding: 8px 15px; border: 1px solid #ff4444; background: white; color: #ff4444; border-radius: 4px; cursor: pointer;">Reset to Default</button>
                 <button id="closeSettings" style="padding: 8px 15px; border: none; background: #da8e35; color: white; border-radius: 4px; cursor: pointer;">Save & Close</button>
@@ -453,12 +500,14 @@
     }
 
     let activeModal = null;
+    let settingsChanged = false;  // Track if settings were changed
 
     function showSettingsModal() {
         if (activeModal) {
             activeModal.remove();
         }
 
+        settingsChanged = false;  // Reset change tracker
         const modal = document.createElement('div');
         modal.style.cssText = `
             position: fixed;
@@ -491,7 +540,10 @@
                 return;
             }
 
-            window.nexusConfig.setFeature(setting, value);
+            if (config[setting] !== value) {
+                settingsChanged = true;
+                window.nexusConfig.setFeature(setting, value);
+            }
         }
 
         modal.addEventListener('change', (e) => {
@@ -509,14 +561,18 @@
         modal.querySelector('#closeSettings').onclick = () => {
             modal.remove();
             activeModal = null;
-            location.reload();
+            if (settingsChanged) {
+                location.reload();
+            }
         };
 
         modal.querySelector('#resetSettings').onclick = () => {
+            settingsChanged = true;  // Reset counts as a change
             window.nexusConfig.reset();
-            saveSettings(config); // Ensure settings are saved
+            saveSettings(config);
             modal.remove();
-            showSettingsModal();
+            activeModal = null;
+            location.reload(); // Add reload here instead of showing modal again
         };
 
         document.body.appendChild(modal);
