@@ -31,4 +31,4 @@ Considering the fact that I am not exactly talented in JS, there may be some qui
 
 
 
-TODO: Test on FireFox
+TODO: Test on FireFox, and in general ALOT more testing...
