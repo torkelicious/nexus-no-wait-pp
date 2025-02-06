@@ -3,8 +3,9 @@ GitHub host for Nexus No Wait++
 
 https://greasyfork.org/en/scripts/519037-nexus-no-wait
 
-Install: [GreasyFork](https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.user.js)
+Install via: [GreasyFork](https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.user.js)
 ***or*** [GitHub](https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/NexusNoWaitPP.user.js)
+using your scriptmanager of choice
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
 Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
