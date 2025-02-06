@@ -10,12 +10,42 @@
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       GM_deleteValue
+// @grant       GM_openInTab
 // @license MIT
 // ==/UserScript==
 
-/* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM */
+/* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM_openInTab, GM */
 
 (function () {
+    // === Configuration Types ===
+    /**
+     * @typedef {Object} Config
+     * @property {boolean} autoCloseTab - Close tab automatically after download starts
+     * @property {boolean} skipRequirements - Skip downloading requirements popup/tab
+     * @property {boolean} showAlerts - Show error messages as browser alerts
+     * @property {boolean} refreshOnError - Auto-refresh page when errors occur
+     * @property {number} requestTimeout - AJAX request timeout in milliseconds
+     * @property {number} closeTabTime - Delay before closing tab in milliseconds
+     * @property {boolean} debug - Enable debug mode with detailed alerts
+     * @property {boolean} playErrorSound - Enable error sound notifications
+     */
+
+    /**
+     * @typedef {Object} SettingDefinition
+     * @property {string} name - User-friendly setting name
+     * @property {string} description - Detailed setting description for tooltips
+     */
+
+    /**
+     * @typedef {Object} UIStyles
+     * @property {string} button - CSS for buttons
+     * @property {string} modal - CSS for modal windows
+     * @property {string} settings - CSS for settings headers
+     * @property {string} section - CSS for sections
+     * @property {string} sectionHeader - CSS for section headers
+     * @property {string} input - CSS for input fields
+     * @property {Object} btn - CSS for button variants
+     */
 
     // === Configuration ===
     /**
@@ -66,16 +96,16 @@
      */
     function validateSettings(settings) {
         if (!settings || typeof settings !== 'object') return {...DEFAULT_CONFIG};
-        
+
         const validated = {...settings}; // Keep all existing settings
-        
+
         // Only validate/override invalid values
         for (const [key, defaultValue] of Object.entries(DEFAULT_CONFIG)) {
             if (typeof validated[key] !== typeof defaultValue) {
                 validated[key] = defaultValue;
             }
         }
-        
+
         return validated;
     }
 
@@ -109,11 +139,14 @@
     }
     const config = Object.assign({}, DEFAULT_CONFIG, loadSettings());
 
-    // Create single global sound instance
+    // Create global sound instance
+    /**
+     * Global error sound instance (preloaded)
+     * @type {HTMLAudioElement}
+     */
     const errorSound = new Audio('https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/dev/errorsound.mp3');
     errorSound.load(); // Preload sound
 
-    // Simplified sound utility without throttling
     /**
      * Plays error sound if enabled
      * @returns {void}
@@ -158,7 +191,7 @@
     /**
      * Auto-redirects from requirements to files
      */
-    if (window.location.href.includes('tab=requirements') && config.skipRequirements) 
+    if (window.location.href.includes('tab=requirements') && config.skipRequirements)
     {
         const newUrl = window.location.href.replace('tab=requirements', 'tab=files');
         window.location.replace(newUrl);
@@ -167,7 +200,7 @@
 
     // === AJAX Setup and Configuration ===
     let ajaxRequestRaw;
-    if (typeof(GM_xmlhttpRequest) !== "undefined") 
+    if (typeof(GM_xmlhttpRequest) !== "undefined")
     {
         ajaxRequestRaw = GM_xmlhttpRequest;
     } else if (typeof(GM) !== "undefined" && typeof(GM.xmlHttpRequest) !== "undefined") {
@@ -201,10 +234,10 @@
         });
     }
 
-    // === Button State Management ===
+    // === Button Management ===
 
     /**
-     * Updates button appearance and shows error message
+     * Updates button appearance and shows errors
      * @param {HTMLElement} button - The button element
      * @param {Error|Object} error - Error details
      */
@@ -228,10 +261,10 @@
     }
 
 
-    // Closes the tab after download starts
-    function closeOnDL() 
+    // Closes tab after download starts
+    function closeOnDL()
     {
-        if (config.autoCloseTab)
+        if (config.autoCloseTab && !isArchiveDownload) // Modified to check for archive downloads
         {
         setTimeout(() => window.close(), config.closeTabTime);
         }
@@ -244,6 +277,12 @@
      * @param {Event} event - Click event object
      */
     function clickListener(event) {
+        // Skip if this is an archive download
+        if (isArchiveDownload) {
+            isArchiveDownload = false; // Reset the flag
+            return;
+        }
+
         const href = this.href || window.location.href;
         const params = new URL(href).searchParams;
 
@@ -281,14 +320,14 @@
                             if (data.url) {
                                 btnSuccess(button);
                                 document.location.href = data.url;
-                                closeOnDL(); 
+                                closeOnDL();
                             }
                         } catch (e) {
-                            btnError(button, e); 
+                            btnError(button, e);
                         }
                     }
                 },
-                error(xhr) {  
+                error(xhr) {
                     btnError(button, xhr);
                 }
             };
@@ -313,14 +352,14 @@
                                 const downloadUrl = slow.getAttribute("data-download-url");
                                 btnSuccess(button);
                                 document.location.href = downloadUrl;
-                                closeOnDL();  
+                                closeOnDL();
                             } else {
                                 btnError(button);
                             }
                         }
                     },
                     error(xhr) {
-                        btnError(button, xhr);  
+                        btnError(button, xhr);
                     }
                 });
             }
@@ -366,7 +405,7 @@
         }
     }
 
-    // Automatically skips file requirements popup and starts download
+    // Automatically skips file requirements popup and downloads
     function autoClickRequiredFileDownload() {
         const observer = new MutationObserver(() => {
             const downloadButton = document.querySelector(".popup-mod-requirements a.btn");
@@ -380,11 +419,11 @@
             }
         });
 
-        observer.observe(document.body, { 
-            childList: true, 
+        observer.observe(document.body, {
+            childList: true,
             subtree: true,
-            attributes: true, // Also watch for attribute changes
-            attributeFilter: ['style', 'class'] // Specifically watch style and class changes
+            attributes: true,
+            attributeFilter: ['style', 'class']
         });
     }
 
@@ -392,17 +431,28 @@
 
     // Modifies download links for archived files
     // Adds both manual and mod manager download options to archived files
+    /**
+     * Tracks if current download is from archives
+     * @type {boolean}
+     */
+    let isArchiveDownload = false;
+
     function archivedFile() {
-        // Only run if we're in the archived category
+        // Only run in the archived category
         if (!window.location.href.includes('category=archived')) {
             return;
         }
-    
+
         // Cache DOM queries and path
         const path = `${location.protocol}//${location.host}${location.pathname}`;
+
         const downloadTemplate = (fileId) => `
             <li>
-                <a class="btn inline-flex" href="${path}?tab=files&file_id=${fileId}&nmm=1" tabindex="0">
+                <a class="btn inline-flex download-btn"
+                   href="${path}?tab=files&file_id=${fileId}&nmm=1"
+                   data-fileid="${fileId}"
+                   data-manager="true"
+                   tabindex="0">
                     <svg title="" class="icon icon-nmm">
                         <use xlink:href="https://www.nexusmods.com/assets/images/icons/icons.svg#icon-nmm"></use>
                     </svg>
@@ -410,30 +460,40 @@
                 </a>
             </li>
             <li>
-                <a class="btn inline-flex" href="${path}?tab=files&file_id=${fileId}" tabindex="0">
+                <a class="btn inline-flex download-btn"
+                   href="${path}?tab=files&file_id=${fileId}"
+                   data-fileid="${fileId}"
+                   data-manager="false"
+                   tabindex="0">
                     <svg title="" class="icon icon-manual">
                         <use xlink:href="https://www.nexusmods.com/assets/images/icons/icons.svg#icon-manual"></use>
                     </svg>
                     <span class="flex-label">Manual download</span>
                 </a>
             </li>`;
-    
-        // Use more specific selectors and modern array methods
+
         const downloadSections = Array.from(document.querySelectorAll('.accordion-downloads'));
         const fileHeaders = Array.from(document.querySelectorAll('.file-expander-header'));
-    
-        // Update downloads in a single pass
+
         downloadSections.forEach((section, index) => {
             const fileId = fileHeaders[index]?.getAttribute('data-id');
             if (fileId) {
                 section.innerHTML = downloadTemplate(fileId);
+
+                // Modified click handler to keep original tab open
+                const buttons = section.querySelectorAll('.download-btn');
+                buttons.forEach(btn => {
+                    btn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        isArchiveDownload = true;  // Set flag before opening tab
+                        GM_openInTab(this.href, { active: false });
+                    });
+                });
             }
         });
-    
-        // Add click listeners to new buttons
-        addClickListeners(document.querySelectorAll('.accordion-downloads .btn'));
     }
 
+        // alot of this archive shit is convoluted and kinda stupid but it works...
 
 // --------------------------------------------- === UI === --------------------------------------------- //
 
@@ -564,7 +624,7 @@
         const btn = document.createElement('div');
         btn.innerHTML = 'NexusNoWait++ ⚙️';
         btn.style.cssText = STYLES.button;
-        
+
         btn.onmouseover = () => btn.style.transform = 'translateY(-2px)';
         btn.onmouseout = () => btn.style.transform = 'translateY(0)';
         btn.onclick = () => {
@@ -581,7 +641,7 @@
         document.body.appendChild(btn);
     }
 
-    // Simplified settings UI 
+    //  settings UI
     /**
      * Creates settings UI HTML
      * @returns {string} Generated HTML
@@ -592,8 +652,8 @@
             .map(([key, {name, description}]) => `
                 <div style="margin-bottom:10px;">
                     <label title="${description}" style="display:flex;align-items:center;gap:8px;">
-                        <input type="checkbox" 
-                               ${config[key] ? 'checked' : ''} 
+                        <input type="checkbox"
+                               ${config[key] ? 'checked' : ''}
                                data-setting="${key}">
                         <span>${name}</span>
                     </label>
@@ -605,7 +665,7 @@
                 <div style="margin-bottom:10px;">
                     <label title="${description}" style="display:flex;align-items:center;justify-content:space-between;">
                         <span>${name}:</span>
-                        <input type="number" 
+                        <input type="number"
                                value="${config[key]}"
                                min="0"
                                step="100"
@@ -621,8 +681,8 @@
                     <h4 style="${STYLES.sectionHeader}">Advanced Settings</h4>
                     <div style="margin-bottom:10px;">
                         <label title="${SETTING_UI.debug.description}" style="display:flex;align-items:center;gap:8px;">
-                            <input type="checkbox" 
-                                   ${config.debug ? 'checked' : ''} 
+                            <input type="checkbox"
+                                   ${config.debug ? 'checked' : ''}
                                    data-setting="debug">
                             <span>${SETTING_UI.debug.name}</span>
                         </label>
@@ -651,10 +711,10 @@
     }
 
     let activeModal = null;
-    let settingsChanged = false;  // Track if settings were changed
+    let settingsChanged = false;  // Track settings changes
 
     /**
-     * Shows settings modal and handles interactions
+     * Shows settings and handles interactions
      * @returns {void}
      */
     function showSettingsModal() {
@@ -671,8 +731,8 @@
         // Simple update function
         function updateSetting(element) {
             const setting = element.getAttribute('data-setting');
-            const value = element.type === 'checkbox' ? 
-                element.checked : 
+            const value = element.type === 'checkbox' ?
+                element.checked :
                 parseInt(element.value, 10);
 
             if (typeof value === 'number' && isNaN(value)) {
@@ -713,7 +773,7 @@
             saveSettings(config);
             modal.remove();
             activeModal = null;
-            location.reload(); // Add reload here instead of showing modal again
+            location.reload();
         };
 
         // toggle handler for advanced section
@@ -769,18 +829,18 @@
             const oldValue = config[name];
             config[name] = value; // Direct assignment instead of Object.assign
             saveSettings(config);
-            
+
             // Only apply non-debug settings immediately
             if (name !== 'debug') {
                 applySettings();
             }
-            
+
             // Mark settings as changed if value actually changed
             if (oldValue !== value) {
                 settingsChanged = true;
             }
         },
-        
+
         /**
          * Resets all settings to defaults
          */
@@ -788,9 +848,9 @@
             GM_deleteValue('nexusNoWaitConfig');
             Object.assign(config, DEFAULT_CONFIG);
             saveSettings(config);
-            applySettings();  // Apply changes immediately
+            applySettings();  // Apply changes
         },
-        
+
         /**
          * Gets current configuration
          * @returns {Config} Current configuration
@@ -803,7 +863,7 @@
         if (ajaxRequestRaw) {
             ajaxRequestRaw.timeout = config.requestTimeout;
         }
-        setupDebugMode();  // Setup debug console overrides
+        setupDebugMode();
     }
     // UI Initialization
     applySettings();
@@ -839,13 +899,13 @@
         try {
             mutations.forEach(mutation => {
                 if (!mutation.addedNodes) return;
-                
+
                 mutation.addedNodes.forEach(node => {
                     // Handle direct button matches
                     if (node.tagName === "A" && node.classList?.contains("btn")) {
                         addClickListener(node);
                     }
-                    
+
                     // Handle nested buttons
                     if (node.querySelectorAll) {
                         addClickListeners(node.querySelectorAll("a.btn"));
@@ -860,10 +920,10 @@
     // Initialize everything
     initializeUI();
     initMainFunctions();
-    
-    // Start observing with combined configuration
+
+    // Start observing
     mainObserver.observe(document, {
-        childList: true, 
+        childList: true,
         subtree: true
     });
 
