@@ -26,7 +26,7 @@ This support Manual/Vortex/MO2/NMM downloads.
 - Automatically close tabs after download starts +
 - Notify user via alerts & audio if there is an error with the download +
 - Auto-skip requirements popup/tab to directly download +
-- UI for configuration +
+- UI for configuration + (⚙️ button in bottom right corner)
 
 ### *Based off of: https://greasyfork.org/en/scripts/394039-nexus-no-wait*
 
