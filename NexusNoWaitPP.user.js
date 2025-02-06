@@ -11,6 +11,7 @@
 // @grant       GM_setValue
 // @grant       GM_deleteValue
 // @grant       GM_openInTab
+// @author      Torkelicous
 // @license MIT
 // ==/UserScript==
 
