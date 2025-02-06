@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        Nexus No Wait ++ (DEV)
+// @name        Nexus No Wait ++
 // @description Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
-// @version     dev-2.1
+// @version     1.1.0
 // @include     https://www.nexusmods.com/*/mods/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -14,7 +14,7 @@
 // @license MIT
 // ==/UserScript==
 
-/* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM_openInTab, GM */
+/* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM_openInTab, GM_info GM */
 
 (function () {
     // === Configuration Types ===
@@ -99,7 +99,7 @@
 
         const validated = {...settings}; // Keep all existing settings
 
-        // Only validate/override invalid values
+        // Settings validation
         for (const [key, defaultValue] of Object.entries(DEFAULT_CONFIG)) {
             if (typeof validated[key] !== typeof defaultValue) {
                 validated[key] = defaultValue;
@@ -144,7 +144,7 @@
      * Global error sound instance (preloaded)
      * @type {HTMLAudioElement}
      */
-    const errorSound = new Audio('https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/dev/errorsound.mp3');
+    const errorSound = new Audio('https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/errorsound.mp3');
     errorSound.load(); // Preload sound
 
     /**
@@ -171,7 +171,7 @@
         if (isDebug) {
             console.log("[Nexus No Wait ++]: " + message);
             if (config.debug) {
-                alert("[Nexus No Wait ++] Debug:\n" + message);
+                alert("[Nexus No Wait ++] (Debug):\n" + message);
             }
             return;
         }
@@ -707,6 +707,10 @@
             </div>
             <div style="text-align: center; margin-top: 15px;">
                 <button id="toggleAdvanced" style="${STYLES.btn.advanced}">⚙️ Advanced</button>
+            </div>
+            <div style="text-align: center; margin-top: 15px; color: #666; font-size: 12px;">
+                Version ${GM_info.script.version}
+                \n by Torkelicious
             </div>`;
     }
 
