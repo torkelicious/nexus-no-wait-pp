@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name        Nexus No Wait ++
+// @name        Nexus No Wait ++ (DEV)
 // @description Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
-// @version     1.1.0
-// @include     https://www.nexusmods.com/*/mods/*
+// @version     1.1.1 (DEV)
+// @include     https://www.nexusmods.com/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
 // @grant       GM_xmlhttpRequest
@@ -922,18 +922,30 @@
         }
     });
 
-    // Initialize everything
+    // Check if page is a mod page, file page, or archive. Very redundant just incase.
+    function isRelevantPage() {
+    return window.location.href.match(/nexusmods\.com\/(.*?)\/(mods|files)/) || 
+           window.location.href.includes('tab=files') ||
+           window.location.href.includes('tab=requirements') ||
+           window.location.href.includes('category=archived');
+}
+
+    // Only run main functions on actual mod pages,archives or other files
+    if (isRelevantPage()) {
+        initMainFunctions(); // Initialize functions
+        // Create observer 
+        mainObserver.observe(document, { 
+            childList: true,
+            subtree: true
+        });
+
+        // Cleanup on unload
+        window.addEventListener('unload', () => {
+            mainObserver.disconnect();
+        });
+    }
+
+    // Create settings UI (on all pages)
     initializeUI();
-    initMainFunctions();
 
-    // Start observing
-    mainObserver.observe(document, {
-        childList: true,
-        subtree: true
-    });
-
-    // Cleanup on page unload
-    window.addEventListener('unload', () => {
-        mainObserver.disconnect();
-    });
 })();
