@@ -11,6 +11,10 @@
 // @grant       GM_setValue
 // @grant       GM_deleteValue
 // @grant       GM_openInTab
+// @compatible   chrome
+// @compatible   edge
+// @compatible   firefox
+// @compatible   brave
 // @author      Torkelicous
 // @license MIT
 // ==/UserScript==
