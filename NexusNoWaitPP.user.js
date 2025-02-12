@@ -2,7 +2,7 @@
 // @name        Nexus No Wait ++
 // @description Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
-// @version     1.1.2
+// @version     1.1.3
 // @include     https://www.nexusmods.com/*/mods/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -308,7 +308,7 @@
     // Closes tab after download starts
     function closeOnDL()
     {
-        if (config.autoCloseTab && !isArchiveDownload) // Modified to check for archive downloads
+        if (config.autoCloseTab && !isArchiveDownload) // check for archive downloads
         {
         setTimeout(() => window.close(), config.closeTabTime);
         }
@@ -935,11 +935,11 @@
      */
     function initMainFunctions() {
         archivedFile();
-        updateRequirementsButtons(); // Add this line
         addClickListeners(document.querySelectorAll("a.btn"));
         autoStartFileLink();
         if (config.skipRequirements) {
             autoClickRequiredFileDownload();
+            updateRequirementsButtons(); 
         }
     }
 
