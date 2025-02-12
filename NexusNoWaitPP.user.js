@@ -2,8 +2,8 @@
 // @name        Nexus No Wait ++
 // @description Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
-// @version     1.1.1
-// @include     https://www.nexusmods.com/*
+// @version     1.1.2
+// @include     https://www.nexusmods.com/*/mods/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
 // @grant       GM_xmlhttpRequest
@@ -11,11 +11,6 @@
 // @grant       GM_setValue
 // @grant       GM_deleteValue
 // @grant       GM_openInTab
-// @compatible   chrome
-// @compatible   edge
-// @compatible   firefox
-// @compatible   brave
-// @author      Torkelicous
 // @license MIT
 // ==/UserScript==
 
@@ -201,6 +196,50 @@
         const newUrl = window.location.href.replace('tab=requirements', 'tab=files');
         window.location.replace(newUrl);
         return;
+    }
+
+    // Recent nexus mods update fucked everything, this is my attempt at fixing, really fucking janky but im working on it
+    function updateRequirementsButtons() {
+        const buttons = document.querySelectorAll('a[href*="ModRequirementsPopUp"]');
+        buttons.forEach(button => {
+            const url = new URL(button.href);
+            const fileId = url.searchParams.get('id');
+            // check if modmanager link
+            const hasNMM = url.searchParams.has('nmm');
+            
+            if (fileId) {
+                // Get game name 
+                const gameName = window.location.pathname.split('/')[1];
+                // Get mod ID 
+                const modId = window.location.pathname.split('/mods/')[1];
+
+                // Update button href to ddl
+                const newHref = `${window.location.origin}/${gameName}/mods/${modId}?tab=files&file_id=${fileId}${hasNMM ? '&nmm=1' : ''}`;
+                button.href = newHref;
+                
+                // Add click handler with observer to wait for popup
+                button.addEventListener('click', () => {
+                    // Create observer for popup
+                    const observer = new MutationObserver((mutations, obs) => {
+                        const closeButton = document.querySelector('button.mfp-close');
+                        if (closeButton) {
+                            closeButton.click();
+                            // Disconnect observer
+                            obs.disconnect();
+                        }
+                    });
+
+                    //  observing document for changes (find popup)
+                    observer.observe(document.body, {
+                        childList: true,
+                        subtree: true
+                    });
+
+                    // Cleanup observer 
+                    setTimeout(() => observer.disconnect(), 2500);
+                });
+            }
+        });
     }
 
     // === AJAX Setup and Configuration ===
@@ -896,6 +935,7 @@
      */
     function initMainFunctions() {
         archivedFile();
+        updateRequirementsButtons(); // Add this line
         addClickListeners(document.querySelectorAll("a.btn"));
         autoStartFileLink();
         if (config.skipRequirements) {
@@ -926,30 +966,18 @@
         }
     });
 
-    // Check if page is a mod page, file page, or archive. Very redundant just incase.
-    function isRelevantPage() {
-    return window.location.href.match(/nexusmods\.com\/(.*?)\/(mods|files)/) || 
-           window.location.href.includes('tab=files') ||
-           window.location.href.includes('tab=requirements') ||
-           window.location.href.includes('category=archived');
-}
-
-    // Only run main functions on actual mod pages,archives or other files
-    if (isRelevantPage()) {
-        initMainFunctions(); // Initialize functions
-        // Create observer 
-        mainObserver.observe(document, { 
-            childList: true,
-            subtree: true
-        });
-
-        // Cleanup on unload
-        window.addEventListener('unload', () => {
-            mainObserver.disconnect();
-        });
-    }
-
-    // Create settings UI (on all pages)
+    // Initialize everything
     initializeUI();
+    initMainFunctions();
 
+    // Start observing
+    mainObserver.observe(document, {
+        childList: true,
+        subtree: true
+    });
+
+    // Cleanup on page unload
+    window.addEventListener('unload', () => {
+        mainObserver.disconnect();
+    });
 })();
