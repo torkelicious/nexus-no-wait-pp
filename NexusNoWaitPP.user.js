@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name        Nexus No Wait ++
+// @name        Nexus No Wait ++ (Dev)
 // @description Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
-// @version     1.1.3
+// @version     1.1.4dev
 // @include     https://www.nexusmods.com/*/mods/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -201,44 +201,28 @@
     // Recent nexus mods update fucked everything, this is my attempt at fixing, really fucking janky but im working on it
     function updateRequirementsButtons() {
         const buttons = document.querySelectorAll('a[href*="ModRequirementsPopUp"]');
+        
         buttons.forEach(button => {
             const url = new URL(button.href);
             const fileId = url.searchParams.get('id');
-            // check if modmanager link
             const hasNMM = url.searchParams.has('nmm');
             
-            if (fileId) {
-                // Get game name 
-                const gameName = window.location.pathname.split('/')[1];
-                // Get mod ID 
-                const modId = window.location.pathname.split('/mods/')[1];
+            if (!fileId) return;
 
-                // Update button href to ddl
-                const newHref = `${window.location.origin}/${gameName}/mods/${modId}?tab=files&file_id=${fileId}${hasNMM ? '&nmm=1' : ''}`;
-                button.href = newHref;
-                
-                // Add click handler with observer to wait for popup
-                button.addEventListener('click', () => {
-                    // Create observer for popup
-                    const observer = new MutationObserver((mutations, obs) => {
-                        const closeButton = document.querySelector('button.mfp-close');
-                        if (closeButton) {
-                            closeButton.click();
-                            // Disconnect observer
-                            obs.disconnect();
-                        }
-                    });
+            // Get path components
+            const gameName = window.location.pathname.split('/')[1];
+            const modId = window.location.pathname.split('/mods/')[1];
 
-                    //  observing document for changes (find popup)
-                    observer.observe(document.body, {
-                        childList: true,
-                        subtree: true
-                    });
+            // Update button href
+            button.href = `${window.location.origin}/${gameName}/mods/${modId}?tab=files&file_id=${fileId}${hasNMM ? '&nmm=1' : ''}`;
 
-                    // Cleanup observer 
-                    setTimeout(() => observer.disconnect(), 2500);
-                });
-            }
+            button.addEventListener('click', () => {
+                // Handle popup with timeout
+                setTimeout(() => {
+                    const closeBtn = document.querySelector('button.mfp-close');
+                    if (closeBtn) closeBtn.click();
+                }, 100);
+            });
         });
     }
 
@@ -308,7 +292,7 @@
     // Closes tab after download starts
     function closeOnDL()
     {
-        if (config.autoCloseTab && !isArchiveDownload) // check for archive downloads
+        if (config.autoCloseTab && !isArchiveDownload) // Modified to check for archive downloads
         {
         setTimeout(() => window.close(), config.closeTabTime);
         }
@@ -935,11 +919,11 @@
      */
     function initMainFunctions() {
         archivedFile();
+        updateRequirementsButtons(); // Add this line
         addClickListeners(document.querySelectorAll("a.btn"));
         autoStartFileLink();
         if (config.skipRequirements) {
             autoClickRequiredFileDownload();
-            updateRequirementsButtons(); 
         }
     }
 
