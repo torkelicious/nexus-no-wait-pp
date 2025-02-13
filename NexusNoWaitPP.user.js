@@ -2,7 +2,7 @@
 // @name        Nexus No Wait ++
 // @description Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
-// @version     1.1.3
+// @version     1.1.4
 // @include     https://www.nexusmods.com/*/mods/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -17,35 +17,17 @@
 /* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM_openInTab, GM_info GM */
 
 (function () {
-    // === Configuration Types ===
-    /**
-     * @typedef {Object} Config
-     * @property {boolean} autoCloseTab - Close tab automatically after download starts
-     * @property {boolean} skipRequirements - Skip downloading requirements popup/tab
-     * @property {boolean} showAlerts - Show error messages as browser alerts
-     * @property {boolean} refreshOnError - Auto-refresh page when errors occur
-     * @property {number} requestTimeout - AJAX request timeout in milliseconds
-     * @property {number} closeTabTime - Delay before closing tab in milliseconds
-     * @property {boolean} debug - Enable debug mode with detailed alerts
-     * @property {boolean} playErrorSound - Enable error sound notifications
-     */
 
-    /**
-     * @typedef {Object} SettingDefinition
-     * @property {string} name - User-friendly setting name
-     * @property {string} description - Detailed setting description for tooltips
-     */
-
-    /**
-     * @typedef {Object} UIStyles
-     * @property {string} button - CSS for buttons
-     * @property {string} modal - CSS for modal windows
-     * @property {string} settings - CSS for settings headers
-     * @property {string} section - CSS for sections
-     * @property {string} sectionHeader - CSS for section headers
-     * @property {string} input - CSS for input fields
-     * @property {Object} btn - CSS for button variants
-     */
+    const DEFAULT_CONFIG = {
+        autoCloseTab: true,        // Close tab after download starts
+        skipRequirements: true,    // Skip requirements popup/tab
+        showAlerts: true,          // Show errors as browser alerts
+        refreshOnError: false,     // Refresh page on error
+        requestTimeout: 30000,     // Request timeout (30 sec)
+        closeTabTime: 1000,        // Wait before closing tab (1 sec)
+        debug: false,              // Show debug messages as alerts
+        playErrorSound: true,      // Play a sound on error
+    };
 
     // === Configuration ===
     /**
@@ -59,17 +41,6 @@
      * @property {boolean} debug - Show debug messages as alerts
      * @property {boolean} playErrorSound - Play a sound on error
      */
-
-    const DEFAULT_CONFIG = {
-        autoCloseTab: true,        // Close tab after download starts
-        skipRequirements: true,    // Skip requirements popup/tab
-        showAlerts: true,          // Show errors as browser alerts
-        refreshOnError: false,     // Refresh page on error
-        requestTimeout: 30000,     // Request timeout (30 sec)
-        closeTabTime: 1000,        // Wait before closing tab (1 sec)
-        debug: false,              // Show debug messages as alerts
-        playErrorSound: true,      // Play a sound on error
-    };
 
     /**
      * @typedef {Object} SettingDefinition
@@ -140,17 +111,13 @@
     const config = Object.assign({}, DEFAULT_CONFIG, loadSettings());
 
     // Create global sound instance
-    /**
-     * Global error sound instance (preloaded)
-     * @type {HTMLAudioElement}
-     */
+
     const errorSound = new Audio('https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/errorsound.mp3');
     errorSound.load(); // Preload sound
 
-    /**
-     * Plays error sound if enabled
-     * @returns {void}
-     */
+
+     // Plays error sound if enabled
+
     function playErrorSound() {
         if (!config.playErrorSound) return;
         errorSound.play().catch(e => {
@@ -196,50 +163,6 @@
         const newUrl = window.location.href.replace('tab=requirements', 'tab=files');
         window.location.replace(newUrl);
         return;
-    }
-
-    // Recent nexus mods update fucked everything, this is my attempt at fixing, really fucking janky but im working on it
-    function updateRequirementsButtons() {
-        const buttons = document.querySelectorAll('a[href*="ModRequirementsPopUp"]');
-        buttons.forEach(button => {
-            const url = new URL(button.href);
-            const fileId = url.searchParams.get('id');
-            // check if modmanager link
-            const hasNMM = url.searchParams.has('nmm');
-            
-            if (fileId) {
-                // Get game name 
-                const gameName = window.location.pathname.split('/')[1];
-                // Get mod ID 
-                const modId = window.location.pathname.split('/mods/')[1];
-
-                // Update button href to ddl
-                const newHref = `${window.location.origin}/${gameName}/mods/${modId}?tab=files&file_id=${fileId}${hasNMM ? '&nmm=1' : ''}`;
-                button.href = newHref;
-                
-                // Add click handler with observer to wait for popup
-                button.addEventListener('click', () => {
-                    // Create observer for popup
-                    const observer = new MutationObserver((mutations, obs) => {
-                        const closeButton = document.querySelector('button.mfp-close');
-                        if (closeButton) {
-                            closeButton.click();
-                            // Disconnect observer
-                            obs.disconnect();
-                        }
-                    });
-
-                    //  observing document for changes (find popup)
-                    observer.observe(document.body, {
-                        childList: true,
-                        subtree: true
-                    });
-
-                    // Cleanup observer 
-                    setTimeout(() => observer.disconnect(), 2500);
-                });
-            }
-        });
     }
 
     // === AJAX Setup and Configuration ===
@@ -308,7 +231,7 @@
     // Closes tab after download starts
     function closeOnDL()
     {
-        if (config.autoCloseTab && !isArchiveDownload) // check for archive downloads
+        if (config.autoCloseTab && !isArchiveDownload) // Modified to check for archive downloads
         {
         setTimeout(() => window.close(), config.closeTabTime);
         }
@@ -776,7 +699,7 @@
 
         modal.innerHTML = generateSettingsHTML();
 
-        // Simple update function
+        //  update function
         function updateSetting(element) {
             const setting = element.getAttribute('data-setting');
             const value = element.type === 'checkbox' ?
@@ -836,7 +759,7 @@
         activeModal = modal;
     }
 
-    // Override console methods when debug is enabled
+    // Override console when debug is enabled
     function setupDebugMode() {
         if (config.debug) {
             const originalConsole = {
@@ -862,11 +785,7 @@
         }
     }
 
-    // === Global Configuration Interface ===
-    /**
-     * Global configuration interface
-     * @namespace
-     */
+    // === Configuration ===
     window.nexusConfig = {
         /**
          * Sets a feature setting
@@ -875,10 +794,10 @@
          */
         setFeature: (name, value) => {
             const oldValue = config[name];
-            config[name] = value; // Direct assignment instead of Object.assign
+            config[name] = value;
             saveSettings(config);
 
-            // Only apply non-debug settings immediately
+            // Only apply non-debug settings fast
             if (name !== 'debug') {
                 applySettings();
             }
@@ -889,9 +808,9 @@
             }
         },
 
-        /**
-         * Resets all settings to defaults
-         */
+
+         // Resets all settings to defaults
+
         reset: () => {
             GM_deleteValue('nexusNoWaitConfig');
             Object.assign(config, DEFAULT_CONFIG);
@@ -899,10 +818,9 @@
             applySettings();  // Apply changes
         },
 
-        /**
-         * Gets current configuration
-         * @returns {Config} Current configuration
-         */
+
+        // Gets current configuration
+
         getConfig: () => config
     };
 
@@ -921,41 +839,46 @@
 
     // ===  Initialization ===
     /**
-     * Initializes UI components
-     * @returns {void}
+     * Checks if current URL is a mod page
+     * @returns {boolean} True if URL matches mod pattern
      */
+    function isModPage() {
+        return /nexusmods\.com\/.*\/mods\//.test(window.location.href);
+    }
+
+
+    //Initializes UI components
     function initializeUI() {
         applySettings();
         createSettingsUI();
     }
 
-    /**
-     * Initializes main functionality
-     * @returns {void}
-     */
+    
+    //Initializes main functions if on modpage
     function initMainFunctions() {
+        if (!isModPage()) return;
+        
         archivedFile();
         addClickListeners(document.querySelectorAll("a.btn"));
         autoStartFileLink();
         if (config.skipRequirements) {
             autoClickRequiredFileDownload();
-            updateRequirementsButtons(); 
         }
     }
 
     // Combined observer
     const mainObserver = new MutationObserver((mutations) => {
+        if (!isModPage()) return;
+        
         try {
             mutations.forEach(mutation => {
                 if (!mutation.addedNodes) return;
 
                 mutation.addedNodes.forEach(node => {
-                    // Handle direct button matches
                     if (node.tagName === "A" && node.classList?.contains("btn")) {
                         addClickListener(node);
                     }
 
-                    // Handle nested buttons
                     if (node.querySelectorAll) {
                         addClickListeners(node.querySelectorAll("a.btn"));
                     }
