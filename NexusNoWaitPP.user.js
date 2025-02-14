@@ -3,7 +3,7 @@
 // @description Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
-// @version     1.1.5
+// @version     1.1.6
 // @include     https://*.nexusmods.com/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -12,11 +12,10 @@
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       GM_deleteValue
-// @grant       GM_openInTab
 // @license MIT
 // ==/UserScript==
 
-/* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM_openInTab, GM_info GM */
+/* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM_info GM */
 
 (function () {
 
@@ -397,8 +396,12 @@
 
     // === Archived Files Handling ===
 
-    // Modifies download links for archived files
-    // Adds both manual and mod manager download options to archived files
+    //SVG paths
+    const ICON_PATHS = {
+        nmm: 'https://www.nexusmods.com/assets/images/icons/icons.svg#icon-nmm',
+        manual: 'https://www.nexusmods.com/assets/images/icons/icons.svg#icon-manual'
+    };
+
     /**
      * Tracks if current download is from archives
      * @type {boolean}
@@ -406,63 +409,66 @@
     let isArchiveDownload = false;
 
     function archivedFile() {
-        // Only run in the archived category
-        if (!window.location.href.includes('category=archived')) {
-            return;
-        }
-
-        // Cache DOM queries and path
-        const path = `${location.protocol}//${location.host}${location.pathname}`;
-
-        const downloadTemplate = (fileId) => `
-            <li>
-                <a class="btn inline-flex download-btn"
-                   href="${path}?tab=files&file_id=${fileId}&nmm=1"
-                   data-fileid="${fileId}"
-                   data-manager="true"
-                   tabindex="0">
-                    <svg title="" class="icon icon-nmm">
-                        <use xlink:href="https://www.nexusmods.com/assets/images/icons/icons.svg#icon-nmm"></use>
-                    </svg>
-                    <span class="flex-label">Mod manager download</span>
-                </a>
-            </li>
-            <li>
-                <a class="btn inline-flex download-btn"
-                   href="${path}?tab=files&file_id=${fileId}"
-                   data-fileid="${fileId}"
-                   data-manager="false"
-                   tabindex="0">
-                    <svg title="" class="icon icon-manual">
-                        <use xlink:href="https://www.nexusmods.com/assets/images/icons/icons.svg#icon-manual"></use>
-                    </svg>
-                    <span class="flex-label">Manual download</span>
-                </a>
-            </li>`;
-
-        const downloadSections = Array.from(document.querySelectorAll('.accordion-downloads'));
-        const fileHeaders = Array.from(document.querySelectorAll('.file-expander-header'));
-
-        downloadSections.forEach((section, index) => {
-            const fileId = fileHeaders[index]?.getAttribute('data-id');
-            if (fileId) {
-                section.innerHTML = downloadTemplate(fileId);
-
-                // Modified click handler to keep original tab open
-                const buttons = section.querySelectorAll('.download-btn');
-                buttons.forEach(btn => {
-                    btn.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        isArchiveDownload = true;  // Set flag before opening tab
-                        GM_openInTab(this.href, { active: false });
-                    });
-                });
+        try {
+            // Only run in the archived category
+            if (!window.location.href.includes('category=archived')) {
+                return;
             }
-        });
+
+            //  DOM queries and paths
+            const path = `${location.protocol}//${location.host}${location.pathname}`;
+            const downloadTemplate = (fileId) => `
+                <li>
+                    <a class="btn inline-flex download-btn"
+                       href="${path}?tab=files&file_id=${fileId}&nmm=1"
+                       data-fileid="${fileId}"
+                       data-manager="true"
+                       tabindex="0">
+                        <svg title="" class="icon icon-nmm">
+                            <use xlink:href="${ICON_PATHS.nmm}"></use>
+                        </svg>
+                        <span class="flex-label">Mod manager download</span>
+                    </a>
+                </li>
+                <li>
+                    <a class="btn inline-flex download-btn"
+                       href="${path}?tab=files&file_id=${fileId}"
+                       data-fileid="${fileId}"
+                       data-manager="false"
+                       tabindex="0">
+                        <svg title="" class="icon icon-manual">
+                            <use xlink:href="${ICON_PATHS.manual}"></use>
+                        </svg>
+                        <span class="flex-label">Manual download</span>
+                    </a>
+                </li>`;
+
+            const downloadSections = Array.from(document.querySelectorAll('.accordion-downloads'));
+            const fileHeaders = Array.from(document.querySelectorAll('.file-expander-header'));
+
+            downloadSections.forEach((section, index) => {
+                const fileId = fileHeaders[index]?.getAttribute('data-id');
+                if (fileId) {
+                    section.innerHTML = downloadTemplate(fileId);
+                    const buttons = section.querySelectorAll('.download-btn');
+                    buttons.forEach(btn => {
+                        btn.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            isArchiveDownload = true;
+                            // Use existing download logic
+                            clickListener.call(this, e);
+                            // Reset flag after small delay
+                            setTimeout(() => isArchiveDownload = false, 100);
+                        });
+                    });
+                }
+            });
+
+        } catch (error) {
+            logMessage('Error with archived file: ' + error.message, true);
+            console.error('Archived file error:', error);
+        }
     }
-
-        // alot of this archive shit is convoluted and kinda stupid but it works...
-
 // --------------------------------------------- === UI === --------------------------------------------- //
 
     const SETTING_UI = {
