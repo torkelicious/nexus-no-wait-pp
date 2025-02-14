@@ -2,10 +2,12 @@
 // @name        Nexus No Wait ++
 // @description Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
-// @version     1.1.4
-// @include     https://www.nexusmods.com/*/mods/*
+// @author      Torkelicious
+// @version     1.1.5
+// @include     https://*.nexusmods.com/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
+// @icon        https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
 // @grant       GM_xmlhttpRequest
 // @grant       GM_getValue
 // @grant       GM_setValue
@@ -177,7 +179,7 @@
     // Wrapper for AJAX requests
     function ajaxRequest(obj) {
         if (!ajaxRequestRaw) {
-            logMessage("AJAX functionality not available", true);
+            logMessage("AJAX functionality not available (Your browser or userscript manager may not support these requests!)", true);
             return;
         }
         ajaxRequestRaw({
@@ -380,7 +382,6 @@
                 downloadButton.click();
                 const popup = document.querySelector(".popup-mod-requirements");
                 if (!popup) {
-                    // Popup is gone, ready for next appearance
                     logMessage("Popup closed", false, true);
                 }
             }
@@ -831,10 +832,6 @@
         }
         setupDebugMode();
     }
-    // UI Initialization
-    applySettings();
-    createSettingsUI();
-
 // ------------------------------------------------------------------------------------------------ //
 
     // ===  Initialization ===
