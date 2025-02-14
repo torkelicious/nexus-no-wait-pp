@@ -2,6 +2,7 @@
 // @name        Nexus No Wait ++
 // @description Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
+// @author      Torkelicious
 // @version     1.1.5
 // @include     https://*.nexusmods.com/*
 // @run-at      document-idle
@@ -381,7 +382,6 @@
                 downloadButton.click();
                 const popup = document.querySelector(".popup-mod-requirements");
                 if (!popup) {
-                    // Popup is gone, ready for next appearance
                     logMessage("Popup closed", false, true);
                 }
             }
