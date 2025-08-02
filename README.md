@@ -28,6 +28,7 @@ This support Manual/Vortex/MO2/NMM downloads.
 - Auto-skip requirements popup/tab to directly download +
 - UI for configuration + (⚙️ button in bottom right corner)
 
-### * Originally based off of: https://greasyfork.org/en/scripts/394039-nexus-no-wait*
+---
+Originally based off of: https://greasyfork.org/en/scripts/394039-nexus-no-wait
 
 ⚠ **I do belive this script may break Nexus Mods TOS. Use at your own risk.**
