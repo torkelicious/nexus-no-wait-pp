@@ -12,7 +12,7 @@ Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), T
 
 # Nexus No Wait ++ 
 
-I have rewritten & modified "StrangeT"s Nexus No Wait script with a few extra features, this includes automatically closing a tab once download has started, and notifing the user via a Javascript alet if the download has failed, or other error.
+I have rewritten & modified "StrangeT"s Nexus No Wait script with a few extra features, this includes automatically closing a tab once download has started, and notifing the user via a Javascript alert if the download has failed, or other error.
 
 With this script you can automatically download any files from NexusMods.com without wait.
 This support Manual/Vortex/MO2/NMM downloads.
