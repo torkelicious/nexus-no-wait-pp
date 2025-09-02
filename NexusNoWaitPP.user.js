@@ -3,7 +3,7 @@
 // @description Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
-// @version     1.1.8
+// @version     1.1.9
 // @include     https://*.nexusmods.com/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -13,7 +13,8 @@
 // @grant       GM_setValue
 // @grant       GM_deleteValue
 // @license     GPL-3.0-or-later
-// @downloadURL none
+// @downloadURL https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.user.js
+// @updateURL https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.meta.js
 // ==/UserScript==
 
 /* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM_info GM */
@@ -29,36 +30,6 @@
     debug: false, // Show debug messages as alerts
     playErrorSound: true, // Play a sound on error
   };
-
-  // === Configuration ===
-  /**
-   * @typedef {Object} Config
-   * @property {boolean} autoCloseTab - Close tab after download starts
-   * @property {boolean} skipRequirements - Skip requirements popup/tab
-   * @property {boolean} showAlerts - Show errors as browser alerts
-   * @property {boolean} refreshOnError - Refresh page on error
-   * @property {number} requestTimeout - Request timeout in milliseconds
-   * @property {number} closeTabTime - Wait before closing tab in milliseconds
-   * @property {boolean} debug - Show debug messages as alerts
-   * @property {boolean} playErrorSound - Play a sound on error
-   */
-
-  /**
-   * @typedef {Object} SettingDefinition
-   * @property {string} name - Display name of the setting
-   * @property {string} description - Tooltip description
-   */
-
-  /**
-   * @typedef {Object} UIStyles
-   * @property {string} button - Button styles
-   * @property {string} modal - Modal window styles
-   * @property {string} settings - Settings header styles
-   * @property {string} section - Section styles
-   * @property {string} sectionHeader - Section header styles
-   * @property {string} input - Input field styles
-   * @property {Object} btn - Button variant styles
-   */
 
   // === Settings Management ===
   function validateSettings(settings) {
@@ -245,8 +216,7 @@
     }
   }
 
-  // attempt at fixing broken download buttons in the action bar
-
+  // fix download buttons in the action bar
   // determine a primary/selected file_id from the action bar or page
   function getPrimaryFileId() {
     try {
@@ -261,7 +231,7 @@
         if (fid) return fid;
       }
 
-      // Fallback to visible download link with file_id anywhere on page
+      // Fallback to visible download link with file_id on page
       const anyFileLink = document.querySelector('a[href*="file_id="]');
       if (anyFileLink) {
         const fid = new URL(anyFileLink.href, location.href).searchParams.get(
@@ -285,9 +255,9 @@
     try {
       if (!el || !(el instanceof HTMLElement)) return false;
       if (el.classList && el.classList.contains("download-open-tab"))
-        return true; // new site class
+        return true; 
       const li = el.closest("li");
-      if (li && li.id === "action-manual") return true; // new site id container
+      if (li && li.id === "action-manual") return true; 
       return false;
     } catch {
       return false;
@@ -333,30 +303,51 @@
           "&game_id=" +
           encodeURIComponent(gameId || ""),
         headers: {
-          Origin: "*",
+          Origin: "https://www.nexusmods.com",
           Referer: href,
+          "Sec-Fetch-Site": "same-origin",
           "X-Requested-With": "XMLHttpRequest",
           "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         },
         success(data) {
-          if (data) {
-            try {
-              data = JSON.parse(data);
-              if (data.url) {
-                btnSuccess(button);
-                document.location.href = data.url;
-                closeOnDL();
-              } else {
-                btnError(button, {
-                  message: "No download URL returned from server",
-                });
-              }
-            } catch (e) {
-              btnError(button, e);
-            }
-          } else {
+          console.log("Nexus No Wait ++ [POST] raw response (preview):", String(data).slice(0, 1200));
+          if (!data) {
             btnError(button, { message: "Empty response from server" });
+            return;
           }
+
+          let parsed = null;
+          try {
+            parsed = JSON.parse(data);
+          } catch (e) {
+            parsed = null;
+          }
+
+          if (parsed && parsed.url) {
+            btnSuccess(button);
+            document.location.href = parsed.url;
+            closeOnDL();
+            return;
+          }
+
+          // Fallback looking for nxm:// or https? link in the response body
+          const text = String(data);
+          const nxmMatch = text.match(/(nxm:\/\/[^\s"'<>]+)/i);
+          if (nxmMatch) {
+            btnSuccess(button);
+            document.location.href = nxmMatch[1];
+            closeOnDL();
+            return;
+          }
+          const httpMatch = text.match(/\bhttps?:\/\/[^\s"'<>]+/i);
+          if (httpMatch) {
+            btnSuccess(button);
+            document.location.href = httpMatch[0];
+            closeOnDL();
+            return;
+          }
+
+          btnError(button, { message: "Could not extract download URL from server response." });
         },
         error(xhr) {
           btnError(button, xhr);
@@ -387,30 +378,51 @@
         url: "/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl",
         data: "fid=" + fileId + "&game_id=" + gameId,
         headers: {
-          Origin: "*",
+          Origin: "https://www.nexusmods.com",
           Referer: href,
+          "Sec-Fetch-Site": "same-origin",
           "X-Requested-With": "XMLHttpRequest",
           "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         },
         success(data) {
-          if (data) {
-            try {
-              data = JSON.parse(data);
-              if (data.url) {
-                btnSuccess(button);
-                document.location.href = data.url;
-                closeOnDL();
-              } else {
-                btnError(button, {
-                  message: "No download URL returned from server",
-                });
-              }
-            } catch (e) {
-              btnError(button, e);
-            }
-          } else {
+          console.log("NNW++ [POST] raw response (preview):", String(data).slice(0, 1200));
+          if (!data) {
             btnError(button, { message: "Empty response from server" });
+            return;
           }
+
+          let parsed = null;
+          try {
+            parsed = JSON.parse(data);
+          } catch (e) {
+            parsed = null;
+          }
+
+          if (parsed && parsed.url) {
+            btnSuccess(button);
+            document.location.href = parsed.url;
+            closeOnDL();
+            return;
+          }
+
+          // Fallbacks
+          const text = String(data);
+          const nxmMatch = text.match(/(nxm:\/\/[^\s"'<>]+)/i);
+          if (nxmMatch) {
+            btnSuccess(button);
+            document.location.href = nxmMatch[1];
+            closeOnDL();
+            return;
+          }
+          const httpMatch = text.match(/\bhttps?:\/\/[^\s"'<>]+/i);
+          if (httpMatch) {
+            btnSuccess(button);
+            document.location.href = httpMatch[0];
+            closeOnDL();
+            return;
+          }
+
+          btnError(button, { message: "No download URL returned from server" });
         },
         error(xhr) {
           btnError(button, xhr);
@@ -420,32 +432,63 @@
       if (!params.get("nmm")) {
         ajaxRequest(ajaxOptions);
       } else {
+        // extract the slowDownloadButton data-download-url
         ajaxRequest({
           type: "GET",
           url: href,
           headers: {
-            Origin: "*",
+            Origin: "https://www.nexusmods.com",
             Referer: document.location.href,
+            "Sec-Fetch-Site": "same-origin",
             "X-Requested-With": "XMLHttpRequest",
           },
           success(data) {
-            if (data) {
-              try {
-                data = JSON.parse(data);
-                if (data.url) {
-                  btnSuccess(button);
-                  document.location.href = data.url;
-                  closeOnDL();
-                } else {
-                  btnError(button, {
-                    message: "No download URL returned from server",
-                  });
-                }
-              } catch (e) {
-                btnError(button, e);
-              }
-            } else {
+            console.log("NNW++ [nmm GET] raw response (preview):", String(data).slice(0, 1200));
+            if (!data) {
               btnError(button, { message: "Empty response from server" });
+              return;
+            }
+
+            try {
+              const doc = new DOMParser().parseFromString(data, "text/html");
+              const slow = doc.getElementById("slowDownloadButton");
+              if (slow) {
+                const downloadUrl = slow.getAttribute("data-download-url") || slow.dataset?.downloadUrl;
+                if (downloadUrl) {
+                  btnSuccess(button);
+                  document.location.href = downloadUrl;
+                  closeOnDL();
+                  return;
+                }
+              }
+
+              // fallback to JSON.parse or link extraction before handing it back to the page
+              let parsed = null;
+              try {
+                parsed = JSON.parse(data);
+              } catch (_) {
+                parsed = null;
+              }
+              if (parsed && parsed.url) {
+                btnSuccess(button);
+                document.location.href = parsed.url;
+                closeOnDL();
+                return;
+              }
+              const text = String(data);
+              const nxmMatch = text.match(/(nxm:\/\/[^\s"'<>]+)/i);
+              if (nxmMatch) {
+                btnSuccess(button);
+                document.location.href = nxmMatch[1];
+                closeOnDL();
+                return;
+              }
+
+              // let the site handle the link (open mod manager)
+              btnSuccess(button);
+              window.location.href = href;
+            } catch (e) {
+              btnError(button, e);
             }
           },
           error(xhr) {
@@ -568,7 +611,6 @@
         const fileId = fileHeaders[index]?.getAttribute("data-id");
         if (fileId) {
           section.innerHTML = downloadTemplate(fileId);
-          // FIX: add listeners to the actual buttons we just injected
           const buttons = section.querySelectorAll("a.btn");
           buttons.forEach((btn) => {
             btn.addEventListener("click", function (e) {
@@ -576,7 +618,6 @@
               isArchiveDownload = true;
               // Use existing download logic
               clickListener.call(this, e);
-              // Reset flag after small delay
               setTimeout(() => (isArchiveDownload = false), 100);
             });
           });
