@@ -3,7 +3,7 @@
 // @description Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
-// @version     1.1.7
+// @version     1.1.8
 // @include     https://*.nexusmods.com/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -13,6 +13,7 @@
 // @grant       GM_setValue
 // @grant       GM_deleteValue
 // @license     GPL-3.0-or-later
+// @downloadURL none
 // ==/UserScript==
 
 /* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM_info GM */
@@ -60,17 +61,11 @@
    */
 
   // === Settings Management ===
-  /**
-   * Validates settings object against default configuration
-   * @param {Object} settings - Settings to validate
-   * @returns {Config} Validated settings object
-   */
   function validateSettings(settings) {
     if (!settings || typeof settings !== "object") return { ...DEFAULT_CONFIG };
 
     const validated = { ...settings }; // Keep all existing settings
 
-    // Settings validation
     for (const [key, defaultValue] of Object.entries(DEFAULT_CONFIG)) {
       if (typeof validated[key] !== typeof defaultValue) {
         validated[key] = defaultValue;
@@ -80,10 +75,6 @@
     return validated;
   }
 
-  /**
-   * Loads settings from storage with validation
-   * @returns {Config} Loaded and validated settings
-   */
   function loadSettings() {
     try {
       const saved = GM_getValue("nexusNoWaitConfig", null);
@@ -95,11 +86,6 @@
     }
   }
 
-  /**
-   * Saves settings to storage
-   * @param {Config} settings - Settings to save
-   * @returns {void}
-   */
   function saveSettings(settings) {
     try {
       GM_setValue("nexusNoWaitConfig", JSON.stringify(settings));
@@ -110,15 +96,13 @@
   }
   const config = Object.assign({}, DEFAULT_CONFIG, loadSettings());
 
-  // Create global sound instance
-
+  // Global sound instance
   const errorSound = new Audio(
     "https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/errorsound.mp3"
   );
   errorSound.load(); // Preload sound
 
   // Plays error sound if enabled
-
   function playErrorSound() {
     if (!config.playErrorSound) return;
     errorSound.play().catch((e) => {
@@ -127,14 +111,6 @@
   }
 
   // === Error Handling ===
-
-  /**
-   * Centralized logging function
-   * @param {string} message - Message to display/log
-   * @param {boolean} [showAlert=false] - If true, shows browser alert
-   * @param {boolean} [isDebug=false] - If true, handles debug logs
-   * @returns {void}
-   */
   function logMessage(message, showAlert = false, isDebug = false) {
     if (isDebug) {
       console.log(
@@ -160,9 +136,6 @@
   }
 
   // === URL and Navigation Handling ===
-  /**
-   * Auto-redirects from requirements to files
-   */
   if (
     window.location.href.includes("tab=requirements") &&
     config.skipRequirements
@@ -200,6 +173,7 @@
       url: obj.url,
       data: obj.data,
       headers: obj.headers,
+      timeout: config.requestTimeout,
       onload: function (response) {
         if (response.status >= 200 && response.status < 300) {
           obj.success(response.responseText);
@@ -217,60 +191,110 @@
   }
 
   // === Button Management ===
-
-  /**
-   * Updates button appearance and shows errors
-   * @param {HTMLElement} button - The button element
-   * @param {Error|Object} error - Error details
-   */
   function btnError(button, error) {
-    button.style.color = "red";
-    let errorMessage = "Download failed: ";
-    if (error) {
-      if (typeof error === "string") {
-        errorMessage += error;
-      } else if (error.message) {
-        errorMessage += error.message;
-      } else if (error.status) {
-        errorMessage += `HTTP ${error.status} ${error.statusText || ""}`;
-      } else if (typeof error.responseText === "string") {
-        errorMessage += error.responseText;
+    try {
+      if (button && button.style) button.style.color = "red";
+      let errorMessage = "Download failed: ";
+      if (error) {
+        if (typeof error === "string") {
+          errorMessage += error;
+        } else if (error.message) {
+          errorMessage += error.message;
+        } else if (error.status) {
+          errorMessage += `HTTP ${error.status} ${error.statusText || ""}`;
+        } else if (typeof error.responseText === "string") {
+          errorMessage += error.responseText;
+        } else {
+          errorMessage += JSON.stringify(error);
+        }
       } else {
-        errorMessage += JSON.stringify(error);
+        errorMessage += "Unknown error";
       }
-    } else {
-      errorMessage += "Unknown error";
+      if (button && "innerText" in button) {
+        button.innerText = "ERROR: " + errorMessage;
+      }
+      logMessage(errorMessage, true);
+    } catch (e) {
+      logMessage(
+        "Unknown error while handling button error: " + e.message,
+        true
+      );
     }
-    button.innerText = "ERROR: " + errorMessage;
-    logMessage(errorMessage, true);
   }
 
   function btnSuccess(button) {
-    button.style.color = "green";
-    button.innerText = "Downloading!";
+    if (button && button.style) button.style.color = "green";
+    if (button && "innerText" in button) {
+      button.innerText = "Downloading!";
+    }
     logMessage("Download started.", false, true);
   }
 
   function btnWait(button) {
-    button.style.color = "yellow";
-    button.innerText = "Wait...";
+    if (button && button.style) button.style.color = "yellow";
+    if (button && "innerText" in button) {
+      button.innerText = "Wait...";
+    }
     logMessage("Loading...", false, true);
   }
 
-  // Closes tab after download starts
+  // Closes tab after download starts (if enabled)
   function closeOnDL() {
     if (config.autoCloseTab && !isArchiveDownload) {
-      // Modified to check for archive downloads
       setTimeout(() => window.close(), config.closeTabTime);
     }
   }
 
+  // attempt at fixing broken download buttons in the action bar
+
+  // determine a primary/selected file_id from the action bar or page
+  function getPrimaryFileId() {
+    try {
+      // Prefer the Vortex action button in the header action bar
+      const vortexAction = document.querySelector(
+        '#action-nmm a[href*="file_id="]'
+      );
+      if (vortexAction) {
+        const fid = new URL(vortexAction.href, location.href).searchParams.get(
+          "file_id"
+        );
+        if (fid) return fid;
+      }
+
+      // Fallback to visible download link with file_id anywhere on page
+      const anyFileLink = document.querySelector('a[href*="file_id="]');
+      if (anyFileLink) {
+        const fid = new URL(anyFileLink.href, location.href).searchParams.get(
+          "file_id"
+        );
+        if (fid) return fid;
+      }
+
+      // Fallback to data-id on file headers (common on Files tab)
+      const header = document.querySelector(".file-expander-header[data-id]");
+      if (header) {
+        const fid = header.getAttribute("data-id");
+        if (fid) return fid;
+      }
+    } catch (e) {
+      // ignore & return null
+    }
+    return null;
+  }
+  function isManualActionButton(el) {
+    try {
+      if (!el || !(el instanceof HTMLElement)) return false;
+      if (el.classList && el.classList.contains("download-open-tab"))
+        return true; // new site class
+      const li = el.closest("li");
+      if (li && li.id === "action-manual") return true; // new site id container
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
   // === Download Handling ===
-  /**
-   * Main click event handler for download buttons
-   * Handles both manual and mod manager downloads
-   * @param {Event} event - Click event object
-   */
   function clickListener(event) {
     // Skip if this is an archive download
     if (isArchiveDownload) {
@@ -278,14 +302,76 @@
       return;
     }
 
-    const href = this.href || window.location.href;
-    const params = new URL(href).searchParams;
+    const selfIsElement = this && this.tagName;
+    const href = (selfIsElement && this.href) || window.location.href;
+    const params = new URL(href, location.href).searchParams;
 
+    // Treat manual action bar button as a direct download button
+    if (selfIsElement && isManualActionButton(this)) {
+      if (event && typeof event.preventDefault === "function") {
+        event.preventDefault();
+      }
+      let button = this;
+      btnWait(button);
+      const section = document.getElementById("section");
+      const gameId = section ? section.dataset.gameId : this.current_game_id;
+
+      let fileId = getPrimaryFileId();
+      if (!fileId) {
+        btnError(button, {
+          message:
+            "Could not determine file ID for download (no link or file list found).",
+        });
+        return;
+      }
+      ajaxRequest({
+        type: "POST",
+        url: "/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl",
+        data:
+          "fid=" +
+          encodeURIComponent(fileId) +
+          "&game_id=" +
+          encodeURIComponent(gameId || ""),
+        headers: {
+          Origin: "*",
+          Referer: href,
+          "X-Requested-With": "XMLHttpRequest",
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        },
+        success(data) {
+          if (data) {
+            try {
+              data = JSON.parse(data);
+              if (data.url) {
+                btnSuccess(button);
+                document.location.href = data.url;
+                closeOnDL();
+              } else {
+                btnError(button, {
+                  message: "No download URL returned from server",
+                });
+              }
+            } catch (e) {
+              btnError(button, e);
+            }
+          } else {
+            btnError(button, { message: "Empty response from server" });
+          }
+        },
+        error(xhr) {
+          btnError(button, xhr);
+        },
+      });
+
+      return;
+    }
     if (params.get("file_id")) {
       let button = event;
-      if (this.href) {
+      if (selfIsElement && this.href) {
         button = this;
-        event.preventDefault();
+        if (event && typeof event.preventDefault === "function") {
+          event.preventDefault();
+        }
       }
       btnWait(button);
 
@@ -296,7 +382,6 @@
       if (!fileId) {
         fileId = params.get("id");
       }
-
       const ajaxOptions = {
         type: "POST",
         url: "/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl",
@@ -304,7 +389,6 @@
         headers: {
           Origin: "*",
           Referer: href,
-          "Sec-Fetch-Site": "same-origin",
           "X-Requested-With": "XMLHttpRequest",
           "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         },
@@ -342,7 +426,6 @@
           headers: {
             Origin: "*",
             Referer: document.location.href,
-            "Sec-Fetch-Site": "same-origin",
             "X-Requested-With": "XMLHttpRequest",
           },
           success(data) {
@@ -371,9 +454,9 @@
         });
       }
 
-      const popup = this.parentNode;
+      const popup = selfIsElement ? this.parentNode : null;
       if (popup && popup.classList.contains("popup")) {
-        popup.getElementsByTagName("button")[0].click();
+        popup.getElementsByTagName("button")[0]?.click();
         const popupButton = document.getElementById("popup" + fileId);
         if (popupButton) {
           btnSuccess(popupButton);
@@ -383,22 +466,17 @@
     } else if (/ModRequirementsPopUp/.test(href)) {
       const fileId = params.get("id");
 
-      if (fileId) {
+      if (fileId && selfIsElement) {
         this.setAttribute("id", "popup" + fileId);
       }
     }
   }
 
   // === Event Listeners  ===
-  /**
-   * Attaches click event listener with proper context
-   * @param {HTMLElement} el - the element to attach listener to
-   */
   function addClickListener(el) {
     el.addEventListener("click", clickListener, true);
   }
 
-  // Attaches click event listeners to multiple elements
   function addClickListeners(els) {
     for (let i = 0; i < els.length; i++) {
       addClickListener(els[i]);
@@ -436,18 +514,12 @@
   }
 
   // === Archived Files Handling ===
-
-  //SVG paths
   const ICON_PATHS = {
     nmm: "https://www.nexusmods.com/assets/images/icons/icons.svg#icon-nmm",
     manual:
       "https://www.nexusmods.com/assets/images/icons/icons.svg#icon-manual",
   };
 
-  /**
-   * Tracks if current download is from archives
-   * @type {boolean}
-   */
   let isArchiveDownload = false;
 
   function archivedFile() {
@@ -457,33 +529,33 @@
         return;
       }
 
-      //  DOM queries and paths
+      // DOM queries and paths
       const path = `${location.protocol}//${location.host}${location.pathname}`;
       const downloadTemplate = (fileId) => `
-                <li>
-                    <a class="btn inline-flex download-btn"
-                       href="${path}?tab=files&file_id=${fileId}&nmm=1"
-                       data-fileid="${fileId}"
-                       data-manager="true"
-                       tabindex="0">
-                        <svg title="" class="icon icon-nmm">
-                            <use xlink:href="${ICON_PATHS.nmm}"></use>
-                        </svg>
-                        <span class="flex-label">Mod manager download</span>
-                    </a>
-                </li>
-                <li>
-                    <a class="btn inline-flex download-btn"
-                       href="${path}?tab=files&file_id=${fileId}"
-                       data-fileid="${fileId}"
-                       data-manager="false"
-                       tabindex="0">
-                        <svg title="" class="icon icon-manual">
-                            <use xlink:href="${ICON_PATHS.manual}"></use>
-                        </svg>
-                        <span class="flex-label">Manual download</span>
-                    </a>
-                </li>`;
+    <li>
+        <a class="btn inline-flex"
+           href="${path}?tab=files&file_id=${fileId}&nmm=1"
+           data-fileid="${fileId}"
+           data-manager="true"
+           tabindex="0">
+            <svg title="" class="icon icon-nmm">
+                <use xlink:href="${ICON_PATHS.nmm}"></use>
+            </svg>
+            <span class="flex-label">Vortex</span>
+        </a>
+    </li>
+    <li>
+        <a class="btn inline-flex"
+           href="${path}?tab=files&file_id=${fileId}"
+           data-fileid="${fileId}"
+           data-manager="false"
+           tabindex="0">
+            <svg title="" class="icon icon-manual">
+                <use xlink:href="${ICON_PATHS.manual}"></use>
+            </svg>
+            <span class="flex-label">Manual</span>
+        </a>
+    </li>`;
 
       const downloadSections = Array.from(
         document.querySelectorAll(".accordion-downloads")
@@ -496,7 +568,8 @@
         const fileId = fileHeaders[index]?.getAttribute("data-id");
         if (fileId) {
           section.innerHTML = downloadTemplate(fileId);
-          const buttons = section.querySelectorAll(".download-btn");
+          // FIX: add listeners to the actual buttons we just injected
+          const buttons = section.querySelectorAll("a.btn");
           buttons.forEach((btn) => {
             btn.addEventListener("click", function (e) {
               e.preventDefault();
@@ -514,6 +587,7 @@
       console.error("Archived file error:", error);
     }
   }
+
   // --------------------------------------------- === UI === --------------------------------------------- //
 
   const SETTING_UI = {
@@ -586,7 +660,7 @@
             max-width:90%;
             max-height:90vh;
             overflow-y:auto;
-            font-family:-apple-system, system-ui, sans-serif;`,
+            font-family:-apple-system, system.ui, sans-serif;`,
     settings: `
             margin:0 0 20px 0;
             color:#da8e35;
@@ -654,7 +728,6 @@
         activeModal.remove();
         activeModal = null;
         if (settingsChanged) {
-          // Only reload if settings were changed
           location.reload();
         }
       } else {
@@ -664,11 +737,6 @@
     document.body.appendChild(btn);
   }
 
-  //  settings UI
-  /**
-   * Creates settings UI HTML
-   * @returns {string} Generated HTML
-   */
   function generateSettingsHTML() {
     const normalBooleanSettings = Object.entries(SETTING_UI)
       .filter(
@@ -705,7 +773,6 @@
       )
       .join("");
 
-    // debug section
     const advancedSection = `
             <div id="advancedSection" style="display:none;">
                 <div style="${STYLES.section}">
@@ -750,10 +817,6 @@
   let activeModal = null;
   let settingsChanged = false; // Track settings changes
 
-  /**
-   * Shows settings and handles interactions
-   * @returns {void}
-   */
   function showSettingsModal() {
     if (activeModal) {
       activeModal.remove();
@@ -765,7 +828,6 @@
 
     modal.innerHTML = generateSettingsHTML();
 
-    //  update function
     function updateSetting(element) {
       const setting = element.getAttribute("data-setting");
       const value =
@@ -799,14 +861,13 @@
     modal.querySelector("#closeSettings").onclick = () => {
       modal.remove();
       activeModal = null;
-      // Only reload if settings were changed
       if (settingsChanged) {
         location.reload();
       }
     };
 
     modal.querySelector("#resetSettings").onclick = () => {
-      settingsChanged = true; // Reset counts as a change
+      settingsChanged = true;
       window.nexusConfig.reset();
       saveSettings(config);
       modal.remove();
@@ -814,7 +875,6 @@
       location.reload();
     };
 
-    // toggle handler for advanced section
     modal.querySelector("#toggleAdvanced").onclick = (e) => {
       const section = modal.querySelector("#advancedSection");
       const isHidden = section.style.display === "none";
@@ -854,71 +914,56 @@
 
   // === Configuration ===
   window.nexusConfig = {
-    /**
-     * Sets a feature setting
-     * @param {string} name - Setting name
-     * @param {any} value - Setting value
-     */
     setFeature: (name, value) => {
       const oldValue = config[name];
       config[name] = value;
       saveSettings(config);
 
-      // Only apply non-debug settings fast
       if (name !== "debug") {
         applySettings();
       }
 
-      // Mark settings as changed if value actually changed
       if (oldValue !== value) {
         settingsChanged = true;
       }
     },
 
-    // Resets all settings to defaults
-
     reset: () => {
       GM_deleteValue("nexusNoWaitConfig");
       Object.assign(config, DEFAULT_CONFIG);
       saveSettings(config);
-      applySettings(); // Apply changes
+      applySettings();
     },
-
-    // Gets current configuration
 
     getConfig: () => config,
   };
 
   function applySettings() {
-    // Update AJAX timeout
-    if (ajaxRequestRaw) {
-      ajaxRequestRaw.timeout = config.requestTimeout;
-    }
     setupDebugMode();
   }
   // ------------------------------------------------------------------------------------------------ //
 
   // ===  Initialization ===
-  /**
-   * Checks if current URL is a mod page
-   * @returns {boolean} True if URL matches mod pattern
-   */
   function isModPage() {
     return /nexusmods\.com\/.*\/mods\//.test(window.location.href);
   }
 
-  //Initializes UI components
   function initializeUI() {
     applySettings();
     createSettingsUI();
   }
 
-  //Initializes main functions if on modpage
   function initMainFunctions() {
     if (!isModPage()) return;
 
     archivedFile();
     addClickListeners(document.querySelectorAll("a.btn"));
+    // Also observe new "action bar" buttons if they lack .btn for some reason
+    const actionManual = document.querySelector("#action-manual a");
+    const actionNmm = document.querySelector("#action-nmm a");
+    if (actionManual) addClickListener(actionManual);
+    if (actionNmm) addClickListener(actionNmm);
+
     autoStartFileLink();
     if (config.skipRequirements) {
       autoClickRequiredFileDownload();
@@ -939,7 +984,12 @@
           }
 
           if (node.querySelectorAll) {
+            // Attach to regular buttons and new action bar links
             addClickListeners(node.querySelectorAll("a.btn"));
+            const manu = node.querySelectorAll?.("#action-manual a");
+            manu && manu.forEach?.((el) => addClickListener(el));
+            const nmm = node.querySelectorAll?.("#action-nmm a");
+            nmm && nmm.forEach?.((el) => addClickListener(el));
           }
         });
       });
