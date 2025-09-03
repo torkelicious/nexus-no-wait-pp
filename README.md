@@ -8,7 +8,7 @@ Install via: [GreasyFork](https://update.greasyfork.org/scripts/519037/Nexus%20N
 using your scriptmanager of choice
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
-Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
+Download from Nexusmods.com without wait (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 
 # Nexus No Wait ++ 
 
