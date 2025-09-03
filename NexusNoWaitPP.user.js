@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
-// @description Download from Nexusmods.com without wait and redirect (Manual/Vortex/MO2/NMM), Tweaked with extra features.
+// @description Download from nexusmods.com without wait (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
-// @version     1.1.9
+// @version     1.1.10
 // @include     https://*.nexusmods.com/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -12,101 +12,142 @@
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       GM_deleteValue
+// @grant       GM_info
+// @connect     nexusmods.com
+// @connect     *.nexusmods.com
+// @connect     raw.githubusercontent.com
 // @license     GPL-3.0-or-later
-// @downloadURL https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.user.js
-// @updateURL https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.meta.js
 // ==/UserScript==
 
 /* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM_info GM */
 
 (function () {
   const DEFAULT_CONFIG = {
-    autoCloseTab: true, // Close tab after download starts
-    skipRequirements: true, // Skip requirements popup/tab
-    showAlerts: true, // Show errors as browser alerts
-    refreshOnError: false, // Refresh page on error
-    requestTimeout: 30000, // Request timeout (30 sec)
-    closeTabTime: 1000, // Wait before closing tab (1 sec)
-    debug: false, // Show debug messages as alerts
-    playErrorSound: true, // Play a sound on error
+    autoCloseTab: true,
+    skipRequirements: true,
+    showAlerts: true,
+    refreshOnError: false,
+    requestTimeout: 30000,
+    closeTabTime: 1000,
+    debug: false,
+    playErrorSound: true,
   };
 
-  // === Settings Management ===
+  // global flags container
+  window.nexusFlags = window.nexusFlags || {};
+
+  const RECENT_HANDLE_MS = 600;
+
+  // logging helpers
+  function debugLog(...args) {
+    try {
+      const prefix = "[Nexus No Wait ++]";
+      (console.debug || console.log).call(
+        console,
+        prefix,
+        ...args,
+        "Page:",
+        window.location.href
+      );
+    } catch (e) {}
+  }
+  function infoLog(...args) {
+    try {
+      (console.info || console.log).call(
+        console,
+        "[Nexus No Wait ++]",
+        ...args,
+        "Page:",
+        window.location.href
+      );
+    } catch (e) {}
+  }
+  function errorLog(...args) {
+    try {
+      (console.error || console.log).call(
+        console,
+        "[Nexus No Wait ++]",
+        ...args,
+        "Page:",
+        window.location.href
+      );
+    } catch (e) {}
+  }
+
+  // === Settings management ===
   function validateSettings(settings) {
     if (!settings || typeof settings !== "object") return { ...DEFAULT_CONFIG };
-
-    const validated = { ...settings }; // Keep all existing settings
-
+    const validated = { ...settings };
     for (const [key, defaultValue] of Object.entries(DEFAULT_CONFIG)) {
       if (typeof validated[key] !== typeof defaultValue) {
         validated[key] = defaultValue;
       }
     }
-
     return validated;
   }
-
   function loadSettings() {
     try {
       const saved = GM_getValue("nexusNoWaitConfig", null);
-      const parsed = saved ? JSON.parse(saved) : DEFAULT_CONFIG;
-      return validateSettings(parsed);
-    } catch (error) {
-      console.warn("GM storage load failed:", error);
+      let parsed;
+      if (!saved) parsed = DEFAULT_CONFIG;
+      else if (typeof saved === "string") {
+        try {
+          parsed = JSON.parse(saved);
+        } catch (e) {
+          parsed = DEFAULT_CONFIG;
+        }
+      } else parsed = saved;
+      const validated = validateSettings(parsed);
+      debugLog("Loaded settings", validated);
+      return validated;
+    } catch (e) {
+      debugLog("Failed loading settings:", e);
       return { ...DEFAULT_CONFIG };
     }
   }
-
   function saveSettings(settings) {
     try {
-      GM_setValue("nexusNoWaitConfig", JSON.stringify(settings));
-      logMessage("Settings saved to GM storage", false, true);
+      // try to store object directly; fallback to JSON string
+      try {
+        GM_setValue("nexusNoWaitConfig", settings);
+      } catch (_) {
+        GM_setValue("nexusNoWaitConfig", JSON.stringify(settings));
+      }
+      debugLog("Saved settings");
     } catch (e) {
       console.error("Failed to save settings:", e);
     }
   }
   const config = Object.assign({}, DEFAULT_CONFIG, loadSettings());
 
-  // Global sound instance
+  // Error sound
   const errorSound = new Audio(
     "https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/errorsound.mp3"
   );
-  errorSound.load(); // Preload sound
-
-  // Plays error sound if enabled
+  try {
+    errorSound.load();
+  } catch (e) {
+    debugLog("Could not preload sound", e);
+  }
   function playErrorSound() {
     if (!config.playErrorSound) return;
-    errorSound.play().catch((e) => {
-      console.warn("Error playing sound:", e);
-    });
+    errorSound.play().catch((e) => debugLog("Error playing sound:", e));
   }
 
-  // === Error Handling ===
+  // Error/log helpers used by UI
   function logMessage(message, showAlert = false, isDebug = false) {
     if (isDebug) {
-      console.log(
-        "[Nexus No Wait ++]: " + message + "\nPage:" + window.location.href
-      );
-      if (config.debug) {
-        alert("[Nexus No Wait ++] (Debug):\n" + message);
-      }
+      debugLog(message);
+      if (config.debug) alert("[Nexus No Wait ++] (Debug):\n" + message);
       return;
     }
-
-    playErrorSound(); // Play sound before alert
-    console.error(
-      "[Nexus No Wait ++]: " + message + "\nPage:" + window.location.href
-    );
-    if (showAlert && config.showAlerts) {
-      alert("[Nexus No Wait ++] \n" + message);
-    }
-
-    if (config.refreshOnError) {
-      location.reload();
-    }
+    playErrorSound();
+    errorLog(message);
+    if (showAlert && config.showAlerts) alert("[Nexus No Wait ++]\n" + message);
+    if (config.refreshOnError) location.reload();
   }
 
-  // === URL and Navigation Handling ===
+  // Skip requirements tab
   if (
     window.location.href.includes("tab=requirements") &&
     config.skipRequirements
@@ -115,76 +156,82 @@
       "tab=requirements",
       "tab=files"
     );
+    infoLog("Skipping requirements tab -> files", {
+      from: window.location.href,
+      to: newUrl,
+    });
     window.location.replace(newUrl);
     return;
   }
 
-  // === AJAX Setup and Configuration ===
+  // === AJAX wrapper ===
   let ajaxRequestRaw;
-  if (typeof GM_xmlhttpRequest !== "undefined") {
+  if (typeof GM_xmlhttpRequest !== "undefined")
     ajaxRequestRaw = GM_xmlhttpRequest;
-  } else if (
+  else if (
     typeof GM !== "undefined" &&
     typeof GM.xmlHttpRequest !== "undefined"
-  ) {
+  )
     ajaxRequestRaw = GM.xmlHttpRequest;
-  }
 
-  // Wrapper for AJAX requests
   function ajaxRequest(obj) {
     if (!ajaxRequestRaw) {
-      logMessage(
-        "AJAX functionality not available (Your browser or userscript manager may not support these requests!)",
-        true
-      );
+      logMessage("AJAX not available in this environment", true);
       return;
     }
+    debugLog("ajaxRequest", {
+      method: obj.type,
+      url: obj.url,
+      dataPreview:
+        typeof obj.data === "string" ? obj.data.slice(0, 200) : obj.data,
+    });
     ajaxRequestRaw({
       method: obj.type,
       url: obj.url,
       data: obj.data,
       headers: obj.headers,
       timeout: config.requestTimeout,
-      onload: function (response) {
-        if (response.status >= 200 && response.status < 300) {
-          obj.success(response.responseText);
-        } else {
-          obj.error(response);
-        }
+      onload(response) {
+        // prefer response.response if present, fall back to responseText
+        const body =
+          typeof response.response !== "undefined"
+            ? response.response
+            : response.responseText;
+        debugLog("ajax response", {
+          status: response.status,
+          length: body ? body.length || 0 : 0,
+          preview: body ? String(body).slice(0, 500) : "",
+        });
+        if (response.status >= 200 && response.status < 300) obj.success(body);
+        else obj.error(response);
       },
-      onerror: function (response) {
+      onerror(response) {
         obj.error(response);
       },
-      ontimeout: function (response) {
+      ontimeout(response) {
         obj.error(response);
       },
     });
   }
 
-  // === Button Management ===
+  // === Button UI helpers ===
   function btnError(button, error) {
     try {
       if (button && button.style) button.style.color = "red";
-      let errorMessage = "Download failed: ";
+      let message = "Download failed: ";
       if (error) {
-        if (typeof error === "string") {
-          errorMessage += error;
-        } else if (error.message) {
-          errorMessage += error.message;
-        } else if (error.status) {
-          errorMessage += `HTTP ${error.status} ${error.statusText || ""}`;
-        } else if (typeof error.responseText === "string") {
-          errorMessage += error.responseText;
-        } else {
-          errorMessage += JSON.stringify(error);
-        }
-      } else {
-        errorMessage += "Unknown error";
-      }
-      if (button && "innerText" in button) {
-        button.innerText = "ERROR: " + errorMessage;
-      }
-      logMessage(errorMessage, true);
+        if (typeof error === "string") message += error;
+        else if (error.message) message += error.message;
+        else if (error.status)
+          message += `HTTP ${error.status} ${error.statusText || ""}`;
+        else if (typeof error.responseText === "string")
+          message += error.responseText.slice(0, 300);
+        else message += JSON.stringify(error);
+      } else message += "Unknown error";
+      if (button && "innerText" in button)
+        button.innerText = "ERROR: " + message;
+      errorLog(message);
+      logMessage(message, true);
     } catch (e) {
       logMessage(
         "Unknown error while handling button error: " + e.message,
@@ -192,35 +239,32 @@
       );
     }
   }
-
   function btnSuccess(button) {
     if (button && button.style) button.style.color = "green";
-    if (button && "innerText" in button) {
-      button.innerText = "Downloading!";
-    }
-    logMessage("Download started.", false, true);
+    if (button && "innerText" in button) button.innerText = "Downloading!";
+    infoLog("Download started (UI updated).", { button });
   }
-
   function btnWait(button) {
     if (button && button.style) button.style.color = "yellow";
-    if (button && "innerText" in button) {
-      button.innerText = "Wait...";
-    }
-    logMessage("Loading...", false, true);
+    if (button && "innerText" in button) button.innerText = "Wait...";
+    debugLog("Set button to wait", { button });
   }
 
-  // Closes tab after download starts (if enabled)
   function closeOnDL() {
-    if (config.autoCloseTab && !isArchiveDownload) {
-      setTimeout(() => window.close(), config.closeTabTime);
+    if (config.autoCloseTab) {
+      debugLog("Scheduling close", { delay: config.closeTabTime });
+      setTimeout(() => {
+        debugLog("Closing window");
+        window.close();
+      }, config.closeTabTime);
     }
   }
 
-  // fix download buttons in the action bar
-  // determine a primary/selected file_id from the action bar or page
   function getPrimaryFileId() {
     try {
-      // Prefer the Vortex action button in the header action bar
+      window.nexusFlags.isDLContentPopup = false;
+
+      // action-nmm link
       const vortexAction = document.querySelector(
         '#action-nmm a[href*="file_id="]'
       );
@@ -228,322 +272,460 @@
         const fid = new URL(vortexAction.href, location.href).searchParams.get(
           "file_id"
         );
-        if (fid) return fid;
+        if (fid) {
+          debugLog("getPrimaryFileId found via action-nmm", fid);
+          return fid;
+        }
       }
 
-      // Fallback to visible download link with file_id on page
+      // any file link with file_id
       const anyFileLink = document.querySelector('a[href*="file_id="]');
       if (anyFileLink) {
         const fid = new URL(anyFileLink.href, location.href).searchParams.get(
           "file_id"
         );
-        if (fid) return fid;
+        if (fid) {
+          debugLog("getPrimaryFileId found via any file link", fid);
+          return fid;
+        }
       }
 
-      // Fallback to data-id on file headers (common on Files tab)
+      // file-expander-header[data-id]
       const header = document.querySelector(".file-expander-header[data-id]");
       if (header) {
         const fid = header.getAttribute("data-id");
-        if (fid) return fid;
+        if (fid) {
+          debugLog("getPrimaryFileId found via header", fid);
+          return fid;
+        }
+      }
+
+      // elements with data-fileid / data-id attributes
+      const dataFile = document.querySelector("[data-fileid], [data-id]");
+      if (dataFile) {
+        const fid =
+          dataFile.getAttribute("data-fileid") ||
+          dataFile.getAttribute("data-id") ||
+          (dataFile.dataset && dataFile.dataset.fileid);
+        if (fid) {
+          debugLog("getPrimaryFileId found via data-fileid/data-id", fid);
+          return fid;
+        }
+      }
+
+      // ModRequirementsPopUp links Manual on description/root pages uses popup id=
+      const popupLink = document.querySelector(
+        'a[href*="ModRequirementsPopUp"], a.popup-btn-ajax[href*="Core/Libs/Common/Widgets/ModRequirementsPopUp"]'
+      );
+      if (popupLink) {
+        window.nexusFlags.isDLContentPopup = true;
+        const fid = new URL(popupLink.href, location.href).searchParams.get(
+          "id"
+        );
+        if (fid) {
+          debugLog(
+            "getPrimaryFileId found via ModRequirementsPopUp id param",
+            fid
+          );
+          return fid;
+        }
       }
     } catch (e) {
-      // ignore & return null
+      debugLog("getPrimaryFileId error", e);
+      window.nexusFlags.isDLContentPopup = false;
     }
+
+    debugLog("getPrimaryFileId: none found");
     return null;
   }
+
   function isManualActionButton(el) {
     try {
       if (!el || !(el instanceof HTMLElement)) return false;
       if (el.classList && el.classList.contains("download-open-tab"))
-        return true; 
+        return true;
       const li = el.closest("li");
-      if (li && li.id === "action-manual") return true; 
+      if (li && li.id === "action-manual") return true;
       return false;
-    } catch {
+    } catch (e) {
       return false;
     }
   }
 
-  // === Download Handling ===
+  // === MAIN DOWNLOAD HANDLER ===
   function clickListener(event) {
-    // Skip if this is an archive download
-    if (isArchiveDownload) {
-      isArchiveDownload = false; // Reset the flag
-      return;
-    }
+    console.groupCollapsed("[NNW++] clickListener");
 
-    const selfIsElement = this && this.tagName;
-    const href = (selfIsElement && this.href) || window.location.href;
-    const params = new URL(href, location.href).searchParams;
-
-    // Treat manual action bar button as a direct download button
-    if (selfIsElement && isManualActionButton(this)) {
-      if (event && typeof event.preventDefault === "function") {
-        event.preventDefault();
-      }
-      let button = this;
-      btnWait(button);
-      const section = document.getElementById("section");
-      const gameId = section ? section.dataset.gameId : this.current_game_id;
-
-      let fileId = getPrimaryFileId();
-      if (!fileId) {
-        btnError(button, {
-          message:
-            "Could not determine file ID for download (no link or file list found).",
-        });
+    // duplicate-handling guard
+    try {
+      // If we've just handled this element, skip (prevents double error and sucess at the same time)
+      if (this && this.dataset && this.dataset.nnwHandled === "1") {
+        debugLog("Element recently handled, skipping duplicate");
+        console.groupEnd();
         return;
       }
-      ajaxRequest({
-        type: "POST",
-        url: "/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl",
-        data:
+      try {
+        if (this && this.dataset) this.dataset.nnwHandled = "1";
+      } catch (_) {}
+      try {
+        if (this)
+          setTimeout(() => {
+            try {
+              if (this && this.dataset) delete this.dataset.nnwHandled;
+            } catch (_) {}
+          }, RECENT_HANDLE_MS);
+      } catch (_) {}
+      if (event) {
+        try {
+          event.__nnw_nofollow = true;
+        } catch (_) {}
+      }
+    } catch (e) {
+      debugLog("Guard error", e);
+    }
+
+    try {
+      debugLog("clickListener start", {
+        target: this,
+        href: (this && this.href) || window.location.href,
+      });
+
+      const selfIsElement = this && this.tagName;
+      const href = (selfIsElement && this.href) || window.location.href;
+      const params = new URL(href, location.href).searchParams;
+
+      // Action bar manual button
+      if (selfIsElement && isManualActionButton(this)) {
+        infoLog("Manual action button clicked -> POST GenerateDownloadUrl", {
+          href,
+        });
+        try {
+          if (event && typeof event.preventDefault === "function")
+            event.preventDefault();
+        } catch (_) {}
+        const button = this;
+        btnWait(button);
+        const section = document.getElementById("section");
+        const gameId = section ? section.dataset.gameId : this.current_game_id;
+        const fileId = getPrimaryFileId();
+        if (!fileId) {
+          btnError(button, {
+            message: "Could not determine file ID for download.",
+          });
+          console.groupEnd();
+          return;
+        }
+        const postData =
           "fid=" +
           encodeURIComponent(fileId) +
           "&game_id=" +
-          encodeURIComponent(gameId || ""),
-        headers: {
-          Origin: "https://www.nexusmods.com",
-          Referer: href,
-          "Sec-Fetch-Site": "same-origin",
-          "X-Requested-With": "XMLHttpRequest",
-          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        },
-        success(data) {
-          console.log("Nexus No Wait ++ [POST] raw response (preview):", String(data).slice(0, 1200));
-          if (!data) {
-            btnError(button, { message: "Empty response from server" });
-            return;
-          }
-
-          let parsed = null;
-          try {
-            parsed = JSON.parse(data);
-          } catch (e) {
-            parsed = null;
-          }
-
-          if (parsed && parsed.url) {
-            btnSuccess(button);
-            document.location.href = parsed.url;
-            closeOnDL();
-            return;
-          }
-
-          // Fallback looking for nxm:// or https? link in the response body
-          const text = String(data);
-          const nxmMatch = text.match(/(nxm:\/\/[^\s"'<>]+)/i);
-          if (nxmMatch) {
-            btnSuccess(button);
-            document.location.href = nxmMatch[1];
-            closeOnDL();
-            return;
-          }
-          const httpMatch = text.match(/\bhttps?:\/\/[^\s"'<>]+/i);
-          if (httpMatch) {
-            btnSuccess(button);
-            document.location.href = httpMatch[0];
-            closeOnDL();
-            return;
-          }
-
-          btnError(button, { message: "Could not extract download URL from server response." });
-        },
-        error(xhr) {
-          btnError(button, xhr);
-        },
-      });
-
-      return;
-    }
-    if (params.get("file_id")) {
-      let button = event;
-      if (selfIsElement && this.href) {
-        button = this;
-        if (event && typeof event.preventDefault === "function") {
-          event.preventDefault();
-        }
-      }
-      btnWait(button);
-
-      const section = document.getElementById("section");
-      const gameId = section ? section.dataset.gameId : this.current_game_id;
-
-      let fileId = params.get("file_id");
-      if (!fileId) {
-        fileId = params.get("id");
-      }
-      const ajaxOptions = {
-        type: "POST",
-        url: "/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl",
-        data: "fid=" + fileId + "&game_id=" + gameId,
-        headers: {
-          Origin: "https://www.nexusmods.com",
-          Referer: href,
-          "Sec-Fetch-Site": "same-origin",
-          "X-Requested-With": "XMLHttpRequest",
-          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        },
-        success(data) {
-          console.log("NNW++ [POST] raw response (preview):", String(data).slice(0, 1200));
-          if (!data) {
-            btnError(button, { message: "Empty response from server" });
-            return;
-          }
-
-          let parsed = null;
-          try {
-            parsed = JSON.parse(data);
-          } catch (e) {
-            parsed = null;
-          }
-
-          if (parsed && parsed.url) {
-            btnSuccess(button);
-            document.location.href = parsed.url;
-            closeOnDL();
-            return;
-          }
-
-          // Fallbacks
-          const text = String(data);
-          const nxmMatch = text.match(/(nxm:\/\/[^\s"'<>]+)/i);
-          if (nxmMatch) {
-            btnSuccess(button);
-            document.location.href = nxmMatch[1];
-            closeOnDL();
-            return;
-          }
-          const httpMatch = text.match(/\bhttps?:\/\/[^\s"'<>]+/i);
-          if (httpMatch) {
-            btnSuccess(button);
-            document.location.href = httpMatch[0];
-            closeOnDL();
-            return;
-          }
-
-          btnError(button, { message: "No download URL returned from server" });
-        },
-        error(xhr) {
-          btnError(button, xhr);
-        },
-      };
-
-      if (!params.get("nmm")) {
-        ajaxRequest(ajaxOptions);
-      } else {
-        // extract the slowDownloadButton data-download-url
+          encodeURIComponent(gameId || "");
         ajaxRequest({
-          type: "GET",
-          url: href,
+          type: "POST",
+          url: "/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl",
+          data: postData,
           headers: {
             Origin: "https://www.nexusmods.com",
-            Referer: document.location.href,
+            Referer: href,
             "Sec-Fetch-Site": "same-origin",
             "X-Requested-With": "XMLHttpRequest",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
           },
           success(data) {
-            console.log("NNW++ [nmm GET] raw response (preview):", String(data).slice(0, 1200));
+            debugLog(
+              "POST GenerateDownloadUrl response preview:",
+              String(data).slice(0, 1200)
+            );
             if (!data) {
               btnError(button, { message: "Empty response from server" });
+              console.groupEnd();
               return;
             }
-
+            let parsed = null;
             try {
-              const doc = new DOMParser().parseFromString(data, "text/html");
-              const slow = doc.getElementById("slowDownloadButton");
-              if (slow) {
-                const downloadUrl = slow.getAttribute("data-download-url") || slow.dataset?.downloadUrl;
-                if (downloadUrl) {
-                  btnSuccess(button);
-                  document.location.href = downloadUrl;
-                  closeOnDL();
-                  return;
-                }
-              }
-
-              // fallback to JSON.parse or link extraction before handing it back to the page
-              let parsed = null;
-              try {
-                parsed = JSON.parse(data);
-              } catch (_) {
-                parsed = null;
-              }
-              if (parsed && parsed.url) {
-                btnSuccess(button);
-                document.location.href = parsed.url;
-                closeOnDL();
-                return;
-              }
-              const text = String(data);
-              const nxmMatch = text.match(/(nxm:\/\/[^\s"'<>]+)/i);
-              if (nxmMatch) {
-                btnSuccess(button);
-                document.location.href = nxmMatch[1];
-                closeOnDL();
-                return;
-              }
-
-              // let the site handle the link (open mod manager)
-              btnSuccess(button);
-              window.location.href = href;
+              parsed = typeof data === "string" ? JSON.parse(data) : data;
             } catch (e) {
-              btnError(button, e);
+              btnError(button, { message: "Server response was not JSON" });
+              console.groupEnd();
+              return;
             }
+            if (parsed && parsed.url) {
+              infoLog("Using parsed.url from POST", parsed.url);
+              btnSuccess(button);
+              try {
+                document.location.href = parsed.url;
+              } catch (_) {
+                window.location = parsed.url;
+              }
+              console.groupEnd();
+              return;
+            }
+            btnError(button, {
+              message: "No download URL returned from server",
+            });
+            console.groupEnd();
           },
           error(xhr) {
             btnError(button, xhr);
+            console.groupEnd();
           },
         });
+        return;
       }
 
-      const popup = selfIsElement ? this.parentNode : null;
-      if (popup && popup.classList.contains("popup")) {
-        popup.getElementsByTagName("button")[0]?.click();
-        const popupButton = document.getElementById("popup" + fileId);
-        if (popupButton) {
-          btnSuccess(popupButton);
-          closeOnDL();
+      if (params.get("file_id")) {
+        infoLog("file link clicked", { href });
+        let button = event;
+        if (selfIsElement && this.href) {
+          button = this;
+          try {
+            if (event && typeof event.preventDefault === "function")
+              event.preventDefault();
+          } catch (_) {}
+        }
+        btnWait(button);
+
+        const section = document.getElementById("section");
+        const gameId = section ? section.dataset.gameId : this.current_game_id;
+        let fileId = params.get("file_id") || params.get("id");
+
+        // NMM
+        if (params.get("nmm")) {
+          infoLog("nmm parameter present -> performing NMM GET extraction", {
+            href,
+          });
+          ajaxRequest({
+            type: "GET",
+            url: href,
+            headers: {
+              Origin: "https://www.nexusmods.com",
+              Referer: document.location.href,
+              "Sec-Fetch-Site": "same-origin",
+              "X-Requested-With": "XMLHttpRequest",
+            },
+            success(data) {
+              debugLog(
+                "NMM GET response preview:",
+                String(data).slice(0, 1200)
+              );
+              if (!data) {
+                btnError(button, { message: "Empty response from server" });
+                console.groupEnd();
+                return;
+              }
+              try {
+                const doc = new DOMParser().parseFromString(
+                  String(data),
+                  "text/html"
+                );
+                const slow =
+                  doc.getElementById("slowDownloadButton") ||
+                  doc.querySelector("[data-download-url]");
+                if (slow) {
+                  const downloadUrl =
+                    slow.getAttribute("data-download-url") ||
+                    (slow.dataset && slow.dataset.downloadUrl) ||
+                    slow.href;
+                  if (downloadUrl) {
+                    infoLog("Found data-download-url (NMM)", downloadUrl);
+                    btnSuccess(button);
+                    try {
+                      document.location.href = downloadUrl;
+                    } catch (_) {
+                      window.location = downloadUrl;
+                    }
+                    console.groupEnd();
+                    return;
+                  } else {
+                    btnError(button, {
+                      message:
+                        "NMM page contained slowDownloadButton but no data-download-url attribute",
+                    });
+                    console.groupEnd();
+                    return;
+                  }
+                }
+                let parsed = null;
+                try {
+                  parsed = typeof data === "string" ? JSON.parse(data) : data;
+                } catch (e) {
+                  parsed = null;
+                }
+                if (parsed && parsed.url) {
+                  infoLog("Found parsed.url in NMM GET response", parsed.url);
+                  btnSuccess(button);
+                  try {
+                    document.location.href = parsed.url;
+                  } catch (_) {
+                    window.location = parsed.url;
+                  }
+                  console.groupEnd();
+                  return;
+                }
+                btnError(button, {
+                  message: "Could not find NMM download URL in response",
+                });
+                console.groupEnd();
+              } catch (e) {
+                btnError(button, e);
+                console.groupEnd();
+              }
+            },
+            error(xhr) {
+              btnError(button, xhr);
+              console.groupEnd();
+            },
+          });
+          return;
+        }
+
+        // POST (non-nmm)
+        const postOptions = {
+          type: "POST",
+          url: "/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl",
+          data: "fid=" + fileId + "&game_id=" + gameId,
+          headers: {
+            Origin: "https://www.nexusmods.com",
+            Referer: href,
+            "Sec-Fetch-Site": "same-origin",
+            "X-Requested-With": "XMLHttpRequest",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          },
+          success(data) {
+            debugLog(
+              "file link POST response preview:",
+              String(data).slice(0, 1200)
+            );
+            if (!data) {
+              btnError(button, { message: "Empty response from server" });
+              console.groupEnd();
+              return;
+            }
+            let parsed = null;
+            try {
+              parsed = typeof data === "string" ? JSON.parse(data) : data;
+            } catch (e) {
+              btnError(button, { message: "Server response was not JSON" });
+              console.groupEnd();
+              return;
+            }
+            if (parsed && parsed.url) {
+              infoLog("Using parsed.url from POST", parsed.url);
+              btnSuccess(button);
+              try {
+                document.location.href = parsed.url;
+              } catch (_) {
+                window.location = parsed.url;
+              }
+              console.groupEnd();
+              return;
+            }
+            btnError(button, {
+              message: "No download URL returned from server",
+            });
+            console.groupEnd();
+          },
+          error(xhr) {
+            btnError(button, xhr);
+            console.groupEnd();
+          },
+        };
+        ajaxRequest(postOptions);
+        const popup = selfIsElement ? this.parentNode : null;
+        if (popup && popup.classList.contains("popup")) {
+          popup.getElementsByTagName("button")[0]?.click();
+          const popupButton = document.getElementById("popup" + fileId);
+          if (popupButton) {
+            btnSuccess(popupButton);
+          }
+        }
+        return;
+      }
+      if (/ModRequirementsPopUp/.test(href)) {
+        const fileId = new URL(href, location.href).searchParams.get("id");
+        if (fileId && selfIsElement) {
+          this.setAttribute("id", "popup" + fileId);
         }
       }
-    } else if (/ModRequirementsPopUp/.test(href)) {
-      const fileId = params.get("id");
+    } catch (err) {
+      errorLog("Unhandled error in clickListener", err);
+    } finally {
+      try {
+        if (this && this.dataset) delete this.dataset.nnwProcessing;
+      } catch (_) {}
+      try {
+        if (window.nexusFlags?.isDLContentPopup) {
+          autoCloseDLContentError();
+        }
+      } catch (e) {
+        debugLog("autoCloseDLContentError trigger error", e);
+      }
 
-      if (fileId && selfIsElement) {
-        this.setAttribute("id", "popup" + fileId);
+      console.groupEnd();
+    }
+  }
+
+  // === Event delegation ===
+  function delegatedClickHandler(event) {
+    try {
+      const selector = [
+        "#slowDownloadButton",
+        "#action-manual a",
+        "#action-nmm a",
+        'a[href*="file_id="]',
+        "a.btn",
+      ].join(",");
+      const el =
+        event.target && event.target.closest
+          ? event.target.closest(selector)
+          : null;
+      if (!el) return;
+
+      // If another handler already marked the event as handled by NNW++ skip
+      if (event && event.__nnw_nofollow) {
+        debugLog("delegatedClickHandler: event already handled, skipping");
+        return;
+      }
+      clickListener.call(el, event);
+    } catch (e) {
+      debugLog("delegatedClickHandler error", e);
+    }
+  }
+
+  // Autostart when file_id present in URL
+  function autoStartFileLink() {
+    if (/file_id=/.test(window.location.href)) {
+      debugLog("autoStartFileLink detected file_id in URL");
+      try {
+        const slowButton = document.getElementById("slowDownloadButton");
+        if (slowButton) clickListener.call(slowButton, null);
+        closeOnDL();
+      } catch (e) {
+        debugLog("autoStartFileLink error", e);
       }
     }
   }
 
-  // === Event Listeners  ===
-  function addClickListener(el) {
-    el.addEventListener("click", clickListener, true);
-  }
-
-  function addClickListeners(els) {
-    for (let i = 0; i < els.length; i++) {
-      addClickListener(els[i]);
-    }
-  }
-
-  // === Automatic Downloading ===
-  function autoStartFileLink() {
-    if (/file_id=/.test(window.location.href)) {
-      clickListener(document.getElementById("slowDownloadButton"));
-    }
-  }
-
-  // Automatically skips file requirements popup and downloads
   function autoClickRequiredFileDownload() {
-    const observer = new MutationObserver(() => {
-      const downloadButton = document.querySelector(
-        ".popup-mod-requirements a.btn"
-      );
-      if (downloadButton) {
-        downloadButton.click();
-        const popup = document.querySelector(".popup-mod-requirements");
-        if (!popup) {
-          logMessage("Popup closed", false, true);
+    let popupClicked = false; // ensure only click once per popup instance.
+
+    const observer = new MutationObserver((mutations) => {
+      const popup = document.querySelector(".popup-mod-requirements");
+      if (popup) {
+        if (!popupClicked) {
+          const downloadButton = popup.querySelector("a.btn");
+          const exitPopupBtn = popup.querySelector(".mfp-close");
+          if (downloadButton) {
+            infoLog("Requirements popup detected, auto-clicking download.");
+            popupClicked = true;
+            downloadButton.click();
+            exitPopupBtn?.click();
+          }
+        }
+      } else {
+        if (popupClicked) {
+          debugLog("Requirements popup closed, resetting click flag.");
+          popupClicked = false;
         }
       }
     });
@@ -551,54 +733,102 @@
     observer.observe(document.body, {
       childList: true,
       subtree: true,
-      attributes: true,
-      attributeFilter: ["style", "class"],
     });
   }
 
-  // === Archived Files Handling ===
+  // auto-close for broken ModRequirementsPopUp error overlay that appears on some files
+  function autoCloseDLContentError(delayMs = 200) {
+    try {
+      const closeIf = () => {
+        const a = document.querySelector(
+          '.mfp-preloader a[href*="ModRequirementsPopUp"]'
+        );
+        if (!a) return false;
+        const wrap =
+          a.closest(".mfp-wrap") || document.querySelector(".mfp-wrap");
+        wrap?.querySelector(".mfp-close")?.click();
+        try {
+          wrap?.click();
+        } catch (_) {}
+        debugLog("autoCloseDLContentError: closed", { a, wrap });
+        return true;
+      };
+      if (closeIf()) return;
+      setTimeout(closeIf, delayMs);
+    } catch (e) {
+      debugLog("autoCloseDLContentError error", e);
+    }
+  }
+
+  // Archived files: inject nmm=1 and Manual buttons
   const ICON_PATHS = {
     nmm: "https://www.nexusmods.com/assets/images/icons/icons.svg#icon-nmm",
     manual:
       "https://www.nexusmods.com/assets/images/icons/icons.svg#icon-manual",
   };
 
-  let isArchiveDownload = false;
+  function createArchiveButtonsFor(fileId) {
+    const path = `${location.protocol}//${location.host}${location.pathname}`;
+    const fragment = document.createDocumentFragment();
+
+    const makeBtn = (href, label, isNmm) => {
+      const li = document.createElement("li");
+      const a = document.createElement("a");
+      a.className = "btn inline-flex";
+      a.href = href;
+      a.dataset.fileid = fileId;
+      a.tabIndex = 0;
+      // create svg use element as original does
+      try {
+        const svg = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "svg"
+        );
+        svg.setAttribute(
+          "class",
+          "icon " + (isNmm ? "icon-nmm" : "icon-manual")
+        );
+        const use = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "use"
+        );
+        use.setAttributeNS(
+          "http://www.w3.org/1999/xlink",
+          "xlink:href",
+          isNmm ? ICON_PATHS.nmm : ICON_PATHS.manual
+        );
+        svg.appendChild(use);
+        a.appendChild(svg);
+      } catch (_) {
+        const spanIcon = document.createElement("span");
+        spanIcon.className = "icon " + (isNmm ? "icon-nmm" : "icon-manual");
+        a.appendChild(spanIcon);
+      }
+
+      const labelSpan = document.createElement("span");
+      labelSpan.className = "flex-label";
+      labelSpan.textContent = label;
+      a.appendChild(labelSpan);
+
+      li.appendChild(a);
+      return li;
+    };
+
+    const nmmHref = `${path}?tab=files&file_id=${encodeURIComponent(
+      fileId
+    )}&nmm=1`;
+    const manualHref = `${path}?tab=files&file_id=${encodeURIComponent(
+      fileId
+    )}`;
+
+    fragment.appendChild(makeBtn(nmmHref, "Vortex", true));
+    fragment.appendChild(makeBtn(manualHref, "Manual", false));
+    return fragment;
+  }
 
   function archivedFile() {
     try {
-      // Only run in the archived category
-      if (!window.location.href.includes("category=archived")) {
-        return;
-      }
-
-      // DOM queries and paths
-      const path = `${location.protocol}//${location.host}${location.pathname}`;
-      const downloadTemplate = (fileId) => `
-    <li>
-        <a class="btn inline-flex"
-           href="${path}?tab=files&file_id=${fileId}&nmm=1"
-           data-fileid="${fileId}"
-           data-manager="true"
-           tabindex="0">
-            <svg title="" class="icon icon-nmm">
-                <use xlink:href="${ICON_PATHS.nmm}"></use>
-            </svg>
-            <span class="flex-label">Vortex</span>
-        </a>
-    </li>
-    <li>
-        <a class="btn inline-flex"
-           href="${path}?tab=files&file_id=${fileId}"
-           data-fileid="${fileId}"
-           data-manager="false"
-           tabindex="0">
-            <svg title="" class="icon icon-manual">
-                <use xlink:href="${ICON_PATHS.manual}"></use>
-            </svg>
-            <span class="flex-label">Manual</span>
-        </a>
-    </li>`;
+      if (!window.location.href.includes("category=archived")) return;
 
       const downloadSections = Array.from(
         document.querySelectorAll(".accordion-downloads")
@@ -607,30 +837,33 @@
         document.querySelectorAll(".file-expander-header")
       );
 
-      downloadSections.forEach((section, index) => {
-        const fileId = fileHeaders[index]?.getAttribute("data-id");
-        if (fileId) {
-          section.innerHTML = downloadTemplate(fileId);
-          const buttons = section.querySelectorAll("a.btn");
-          buttons.forEach((btn) => {
-            btn.addEventListener("click", function (e) {
-              e.preventDefault();
-              isArchiveDownload = true;
-              // Use existing download logic
-              clickListener.call(this, e);
-              setTimeout(() => (isArchiveDownload = false), 100);
-            });
-          });
-        }
-      });
-    } catch (error) {
-      logMessage("Error with archived file: " + error.message, true);
-      console.error("Archived file error:", error);
+      for (let idx = 0; idx < downloadSections.length; idx++) {
+        const section = downloadSections[idx];
+        const fileId = fileHeaders[idx]?.getAttribute("data-id");
+        if (!fileId) continue;
+        // skip if we already injected for this fileId into this section
+        try {
+          if (section.dataset && section.dataset.nnwInjected === fileId) {
+            continue;
+          }
+        } catch (_) {}
+
+        infoLog("archivedFile: injecting buttons (safe DOM creation)", {
+          fileId,
+        });
+        while (section.firstChild) section.removeChild(section.firstChild);
+        section.appendChild(createArchiveButtonsFor(fileId));
+
+        try {
+          if (section.dataset) section.dataset.nnwInjected = fileId;
+        } catch (_) {}
+      }
+    } catch (e) {
+      errorLog("archivedFile error", e);
     }
   }
 
-  // --------------------------------------------- === UI === --------------------------------------------- //
-
+  // -------------------------------- UI --------------------------------
   const SETTING_UI = {
     autoCloseTab: {
       name: "Auto-Close tab on download",
@@ -655,13 +888,11 @@
     },
     closeTabTime: {
       name: "Auto-Close tab Delay",
-      description:
-        "Delay before closing tab after download starts (Setting this too low may prevent download from starting!)",
+      description: "Delay before closing tab after download starts",
     },
     debug: {
       name: "⚠️ Debug Alerts",
-      description:
-        "Show all console logs as alerts, don't enable unless you know what you are doing!",
+      description: "Show all console logs as alerts",
     },
     playErrorSound: {
       name: "Play Error Sound",
@@ -669,91 +900,16 @@
     },
   };
 
-  // Extract UI styles
   const STYLES = {
-    button: `
-            position:fixed;
-            bottom:20px;
-            right:20px;
-            background:#2f2f2f;
-            color:white;
-            padding:10px 15px;
-            border-radius:4px;
-            cursor:pointer;
-            box-shadow:0 2px 8px rgba(0,0,0,0.2);
-            z-index:9999;
-            font-family:-apple-system, system-ui, sans-serif;
-            font-size:14px;
-            transition:all 0.2s ease;
-            border:none;`,
-    modal: `
-            position:fixed;
-            top:50%;
-            left:50%;
-            transform:translate(-50%, -50%);
-            background:#2f2f2f;
-            color:#dadada;
-            padding:25px;
-            border-radius:4px;
-            box-shadow:0 2px 20px rgba(0,0,0,0.3);
-            z-index:10000;
-            min-width:300px;
-            max-width:90%;
-            max-height:90vh;
-            overflow-y:auto;
-            font-family:-apple-system, system.ui, sans-serif;`,
-    settings: `
-            margin:0 0 20px 0;
-            color:#da8e35;
-            font-size:18px;
-            font-weight:600;`,
-    section: `
-            background:#363636;
-            padding:15px;
-            border-radius:4px;
-            margin-bottom:15px;`,
-    sectionHeader: `
-            color:#da8e35;
-            margin:0 0 10px 0;
-            font-size:16px;
-            font-weight:500;`,
-    input: `
-            background:#2f2f2f;
-            border:1px solid #444;
-            color:#dadada;
-            border-radius:3px;
-            padding:5px;`,
+    button: `position:fixed;bottom:20px;right:20px;background:#2f2f2f;color:#fff;padding:10px 15px;border-radius:4px;cursor:pointer;z-index:9999;font-family:'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:14px;border:none;`,
+    modal: `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2f2f2f;color:#dadada;padding:25px;border-radius:4px;z-index:10000;min-width:300px;max-width:90%;max-height:90vh;overflow-y:auto;font-family:'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;`,
+    section: `background:#363636;padding:15px;border-radius:4px;margin-bottom:15px;`,
+    sectionHeader: `color:#da8e35;margin:0 0 10px 0;font-size:16px;font-weight:500;`,
+    input: `background:#2f2f2f;border:1px solid #444;color:#dadada;border-radius:3px;padding:5px;`,
     btn: {
-      primary: `
-                padding:8px 15px;
-                border:none;
-                background:#da8e35;
-                color:white;
-                border-radius:3px;
-                cursor:pointer;
-                transition:all 0.2s ease;`,
-      secondary: `
-                padding:8px 15px;
-                border:1px solid #da8e35;
-                background:transparent;
-                color:#da8e35;
-                border-radius:3px;
-                cursor:pointer;
-                transition:all 0.2s ease;`,
-      advanced: `
-                padding: 4px 8px;
-                border: none;
-                background: transparent;
-                color: #666;
-                font-size: 12px;
-                cursor: pointer;
-                transition: all 0.2s ease;
-                opacity: 0.6;
-                text-decoration: underline;
-                &:hover {
-                    opacity: 1;
-                    color: #da8e35;
-                }`,
+      primary: `padding:8px 15px;border:none;background:#da8e35;color:white;border-radius:3px;cursor:pointer;`,
+      secondary: `padding:8px 15px;border:1px solid #da8e35;background:transparent;color:#da8e35;border-radius:3px;cursor:pointer;`,
+      advanced: `padding:4px 8px;background:transparent;color:#666;border:none;cursor:pointer;`,
     },
   };
 
@@ -761,112 +917,82 @@
     const btn = document.createElement("div");
     btn.innerHTML = "NexusNoWait++ ⚙️";
     btn.style.cssText = STYLES.button;
-
     btn.onmouseover = () => (btn.style.transform = "translateY(-2px)");
     btn.onmouseout = () => (btn.style.transform = "translateY(0)");
     btn.onclick = () => {
       if (activeModal) {
         activeModal.remove();
         activeModal = null;
-        if (settingsChanged) {
-          location.reload();
-        }
-      } else {
-        showSettingsModal();
-      }
+        if (settingsChanged) location.reload();
+      } else showSettingsModal();
     };
     document.body.appendChild(btn);
   }
 
   function generateSettingsHTML() {
     const normalBooleanSettings = Object.entries(SETTING_UI)
-      .filter(
-        ([key]) => typeof config[key] === "boolean" && !["debug"].includes(key)
-      )
+      .filter(([k]) => typeof config[k] === "boolean" && k !== "debug")
       .map(
         ([key, { name, description }]) => `
-                <div style="margin-bottom:10px;">
-                    <label title="${description}" style="display:flex;align-items:center;gap:8px;">
-                        <input type="checkbox"
-                               ${config[key] ? "checked" : ""}
-                               data-setting="${key}">
-                        <span>${name}</span>
-                    </label>
-                </div>`
+        <div style="margin-bottom:10px;">
+          <label title="${description}" style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" ${
+              config[key] ? "checked" : ""
+            } data-setting="${key}">
+            <span>${name}</span>
+          </label>
+        </div>`
       )
       .join("");
-
     const numberSettings = Object.entries(SETTING_UI)
       .filter(([key]) => typeof config[key] === "number")
       .map(
         ([key, { name, description }]) => `
-                <div style="margin-bottom:10px;">
-                    <label title="${description}" style="display:flex;align-items:center;justify-content:space-between;">
-                        <span>${name}:</span>
-                        <input type="number"
-                               value="${config[key]}"
-                               min="0"
-                               step="100"
-                               data-setting="${key}"
-                               style="${STYLES.input};width:120px;">
-                    </label>
-                </div>`
+        <div style="margin-bottom:10px;">
+          <label title="${description}" style="display:flex;align-items:center;justify-content:space-between;">
+            <span>${name}:</span>
+            <input type="number" value="${config[key]}" min="0" step="100" data-setting="${key}" style="${STYLES.input};width:120px;">
+          </label>
+        </div>`
       )
       .join("");
-
     const advancedSection = `
-            <div id="advancedSection" style="display:none;">
-                <div style="${STYLES.section}">
-                    <h4 style="${STYLES.sectionHeader}">Advanced Settings</h4>
-                    <div style="margin-bottom:10px;">
-                        <label title="${
-                          SETTING_UI.debug.description
-                        }" style="display:flex;align-items:center;gap:8px;">
-                            <input type="checkbox"
-                                   ${config.debug ? "checked" : ""}
-                                   data-setting="debug">
-                            <span>${SETTING_UI.debug.name}</span>
-                        </label>
-                    </div>
-                </div>
-            </div>`;
-
+      <div id="advancedSection" style="display:none;">
+        <div style="${STYLES.section}">
+          <h4 style="${STYLES.sectionHeader}">Advanced Settings</h4>
+          <div style="margin-bottom:10px;">
+            <label title="${
+              SETTING_UI.debug.description
+            }" style="display:flex;align-items:center;gap:8px;">
+              <input type="checkbox" ${
+                config.debug ? "checked" : ""
+              } data-setting="debug"><span>${SETTING_UI.debug.name}</span>
+            </label>
+          </div>
+        </div>
+      </div>`;
     return `
-            <h3 style="${STYLES.settings}">NexusNoWait++ Settings</h3>
-            <div style="${STYLES.section}">
-                <h4 style="${STYLES.sectionHeader}">Features</h4>
-                ${normalBooleanSettings}
-            </div>
-            <div style="${STYLES.section}">
-                <h4 style="${STYLES.sectionHeader}">Timing</h4>
-                ${numberSettings}
-            </div>
-            ${advancedSection}
-            <div style="margin-top:20px;display:flex;justify-content:center;gap:10px;">
-                <button id="resetSettings" style="${STYLES.btn.secondary}">Reset</button>
-                <button id="closeSettings" style="${STYLES.btn.primary}">Save & Close</button>
-            </div>
-            <div style="text-align: center; margin-top: 15px;">
-                <button id="toggleAdvanced" style="${STYLES.btn.advanced}">⚙️ Advanced</button>
-            </div>
-            <div style="text-align: center; margin-top: 15px; color: #666; font-size: 12px;">
-                Version ${GM_info.script.version}
-                \n by Torkelicious
-            </div>`;
+      <h3 style="${STYLES.sectionHeader}">NexusNoWait++ Settings</h3>
+      <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Features</h4>${normalBooleanSettings}</div>
+      <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Timing</h4>${numberSettings}</div>
+      ${advancedSection}
+      <div style="display:flex;justify-content:center;gap:10px;margin-top:20px;">
+        <button id="resetSettings" style="${STYLES.btn.secondary}">Reset</button>
+        <button id="closeSettings" style="${STYLES.btn.primary}">Save & Close</button>
+      </div>
+      <div style="text-align:center;margin-top:12px;"><button id="toggleAdvanced" style="${STYLES.btn.advanced}">⚙️ Advanced</button></div>
+      <div style="text-align:center;margin-top:12px;color:#666;font-size:12px;">Version ${GM_info.script.version} by Torkelicious</div>
+    `;
   }
 
   let activeModal = null;
-  let settingsChanged = false; // Track settings changes
+  let settingsChanged = false;
 
   function showSettingsModal() {
-    if (activeModal) {
-      activeModal.remove();
-    }
-
-    settingsChanged = false; // Reset change tracker
+    if (activeModal) activeModal.remove();
+    settingsChanged = false;
     const modal = document.createElement("div");
     modal.style.cssText = STYLES.modal;
-
     modal.innerHTML = generateSettingsHTML();
 
     function updateSetting(element) {
@@ -875,12 +1001,10 @@
         element.type === "checkbox"
           ? element.checked
           : parseInt(element.value, 10);
-
       if (typeof value === "number" && isNaN(value)) {
         element.value = config[setting];
         return;
       }
-
       if (config[setting] !== value) {
         settingsChanged = true;
         window.nexusConfig.setFeature(setting, value);
@@ -888,25 +1012,18 @@
     }
 
     modal.addEventListener("change", (e) => {
-      if (e.target.hasAttribute("data-setting")) {
-        updateSetting(e.target);
-      }
+      if (e.target.hasAttribute("data-setting")) updateSetting(e.target);
     });
-
     modal.addEventListener("input", (e) => {
-      if (e.target.type === "number" && e.target.hasAttribute("data-setting")) {
+      if (e.target.type === "number" && e.target.hasAttribute("data-setting"))
         updateSetting(e.target);
-      }
     });
 
     modal.querySelector("#closeSettings").onclick = () => {
       modal.remove();
       activeModal = null;
-      if (settingsChanged) {
-        location.reload();
-      }
+      if (settingsChanged) location.reload();
     };
-
     modal.querySelector("#resetSettings").onclick = () => {
       settingsChanged = true;
       window.nexusConfig.reset();
@@ -915,7 +1032,6 @@
       activeModal = null;
       location.reload();
     };
-
     modal.querySelector("#toggleAdvanced").onclick = (e) => {
       const section = modal.querySelector("#advancedSection");
       const isHidden = section.style.display === "none";
@@ -927,7 +1043,6 @@
     activeModal = modal;
   }
 
-  // Override console when debug is enabled
   function setupDebugMode() {
     if (config.debug) {
       const originalConsole = {
@@ -935,122 +1050,113 @@
         warn: console.warn,
         error: console.error,
       };
-
       console.log = function () {
         originalConsole.log.apply(console, arguments);
         alert("[Debug Log]\n" + Array.from(arguments).join(" "));
       };
-
       console.warn = function () {
         originalConsole.warn.apply(console, arguments);
         alert("[Debug Warn]\n" + Array.from(arguments).join(" "));
       };
-
       console.error = function () {
         originalConsole.error.apply(console, arguments);
         alert("[Debug Error]\n" + Array.from(arguments).join(" "));
       };
+      infoLog("Debug mode enabled");
     }
   }
 
-  // === Configuration ===
   window.nexusConfig = {
-    setFeature: (name, value) => {
-      const oldValue = config[name];
+    setFeature(name, value) {
+      const old = config[name];
       config[name] = value;
       saveSettings(config);
-
-      if (name !== "debug") {
-        applySettings();
-      }
-
-      if (oldValue !== value) {
+      if (name !== "debug") applySettings();
+      if (old !== value) {
         settingsChanged = true;
+        debugLog("Feature changed", name, old, value);
       }
     },
-
-    reset: () => {
+    reset() {
       GM_deleteValue("nexusNoWaitConfig");
       Object.assign(config, DEFAULT_CONFIG);
       saveSettings(config);
       applySettings();
     },
-
-    getConfig: () => config,
+    getConfig() {
+      return config;
+    },
   };
-
   function applySettings() {
     setupDebugMode();
   }
-  // ------------------------------------------------------------------------------------------------ //
 
-  // ===  Initialization ===
+  // Initialization
   function isModPage() {
     return /nexusmods\.com\/.*\/mods\//.test(window.location.href);
   }
-
   function initializeUI() {
     applySettings();
     createSettingsUI();
   }
 
   function initMainFunctions() {
-    if (!isModPage()) return;
-
-    archivedFile();
-    addClickListeners(document.querySelectorAll("a.btn"));
-    // Also observe new "action bar" buttons if they lack .btn for some reason
-    const actionManual = document.querySelector("#action-manual a");
-    const actionNmm = document.querySelector("#action-nmm a");
-    if (actionManual) addClickListener(actionManual);
-    if (actionNmm) addClickListener(actionNmm);
-
-    autoStartFileLink();
-    if (config.skipRequirements) {
-      autoClickRequiredFileDownload();
+    if (!isModPage()) {
+      debugLog("Not a mod page - skipping");
+      return;
     }
-  }
-
-  // Combined observer
-  const mainObserver = new MutationObserver((mutations) => {
-    if (!isModPage()) return;
+    infoLog("Initializing main functions");
+    archivedFile();
+    document.body.addEventListener("click", delegatedClickHandler, true);
 
     try {
+      getPrimaryFileId();
+    } catch (e) {
+      debugLog("initMainFunctions: getPrimaryFileId failed", e);
+    }
+
+    autoStartFileLink();
+    if (config.skipRequirements) autoClickRequiredFileDownload();
+  }
+
+  let archivedDebounceTimer = null;
+  const ARCHIVE_DEBOUNCE_MS = 200;
+
+  const mainObserver = new MutationObserver((mutations) => {
+    if (!isModPage()) return;
+    try {
+      // prevents re-injection
+      let touched = false;
       mutations.forEach((mutation) => {
         if (!mutation.addedNodes) return;
-
         mutation.addedNodes.forEach((node) => {
-          if (node.tagName === "A" && node.classList?.contains("btn")) {
-            addClickListener(node);
-          }
-
-          if (node.querySelectorAll) {
-            // Attach to regular buttons and new action bar links
-            addClickListeners(node.querySelectorAll("a.btn"));
-            const manu = node.querySelectorAll?.("#action-manual a");
-            manu && manu.forEach?.((el) => addClickListener(el));
-            const nmm = node.querySelectorAll?.("#action-nmm a");
-            nmm && nmm.forEach?.((el) => addClickListener(el));
-          }
+          if (node.nodeType !== 1) return;
+          touched = true;
         });
       });
-    } catch (error) {
-      console.error("Error in mutation observer:", error);
+      if (!touched) return;
+      clearTimeout(archivedDebounceTimer);
+      archivedDebounceTimer = setTimeout(() => {
+        try {
+          archivedFile();
+        } finally {
+          archivedDebounceTimer = null;
+        }
+      }, ARCHIVE_DEBOUNCE_MS);
+    } catch (e) {
+      errorLog("MutationObserver error", e);
     }
   });
 
-  // Initialize everything
   initializeUI();
   initMainFunctions();
 
-  // Start observing
-  mainObserver.observe(document, {
-    childList: true,
-    subtree: true,
-  });
-
-  // Cleanup on page unload
-  window.addEventListener("unload", () => {
-    mainObserver.disconnect();
-  });
+  if (isModPage()) {
+    mainObserver.observe(document.body, { childList: true, subtree: true });
+    debugLog("Started mutation observer");
+    window.addEventListener("unload", () => {
+      mainObserver.disconnect();
+      debugLog("Unload: disconnected observer");
+    });
+  }
 })();
