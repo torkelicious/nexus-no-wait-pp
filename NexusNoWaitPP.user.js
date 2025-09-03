@@ -3,7 +3,7 @@
 // @description Download from nexusmods.com without wait (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
-// @version     1.1.10
+// @version     1.1.11
 // @include     https://*.nexusmods.com/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -32,9 +32,6 @@
     debug: false,
     playErrorSound: true,
   };
-
-  // global flags container
-  window.nexusFlags = window.nexusFlags || {};
 
   const RECENT_HANDLE_MS = 600;
 
@@ -107,7 +104,6 @@
   }
   function saveSettings(settings) {
     try {
-      // try to store object directly; fallback to JSON string
       try {
         GM_setValue("nexusNoWaitConfig", settings);
       } catch (_) {
@@ -192,7 +188,6 @@
       headers: obj.headers,
       timeout: config.requestTimeout,
       onload(response) {
-        // prefer response.response if present, fall back to responseText
         const body =
           typeof response.response !== "undefined"
             ? response.response
@@ -260,11 +255,10 @@
     }
   }
 
+  // Primary file id extractor (keeps several page strategies)
   function getPrimaryFileId() {
     try {
-      window.nexusFlags.isDLContentPopup = false;
-
-      // action-nmm link
+      // action-nmm link (vortex)
       const vortexAction = document.querySelector(
         '#action-nmm a[href*="file_id="]'
       );
@@ -300,7 +294,7 @@
         }
       }
 
-      // elements with data-fileid / data-id attributes
+      // fallback data-fileid / data-id attributes
       const dataFile = document.querySelector("[data-fileid], [data-id]");
       if (dataFile) {
         const fid =
@@ -312,44 +306,11 @@
           return fid;
         }
       }
-
-      // ModRequirementsPopUp links Manual on description/root pages uses popup id=
-      const popupLink = document.querySelector(
-        'a[href*="ModRequirementsPopUp"], a.popup-btn-ajax[href*="Core/Libs/Common/Widgets/ModRequirementsPopUp"]'
-      );
-      if (popupLink) {
-        window.nexusFlags.isDLContentPopup = true;
-        const fid = new URL(popupLink.href, location.href).searchParams.get(
-          "id"
-        );
-        if (fid) {
-          debugLog(
-            "getPrimaryFileId found via ModRequirementsPopUp id param",
-            fid
-          );
-          return fid;
-        }
-      }
     } catch (e) {
       debugLog("getPrimaryFileId error", e);
-      window.nexusFlags.isDLContentPopup = false;
     }
-
     debugLog("getPrimaryFileId: none found");
     return null;
-  }
-
-  function isManualActionButton(el) {
-    try {
-      if (!el || !(el instanceof HTMLElement)) return false;
-      if (el.classList && el.classList.contains("download-open-tab"))
-        return true;
-      const li = el.closest("li");
-      if (li && li.id === "action-manual") return true;
-      return false;
-    } catch (e) {
-      return false;
-    }
   }
 
   // === MAIN DOWNLOAD HANDLER ===
@@ -358,7 +319,6 @@
 
     // duplicate-handling guard
     try {
-      // If we've just handled this element, skip (prevents double error and sucess at the same time)
       if (this && this.dataset && this.dataset.nnwHandled === "1") {
         debugLog("Element recently handled, skipping duplicate");
         console.groupEnd();
@@ -394,85 +354,6 @@
       const href = (selfIsElement && this.href) || window.location.href;
       const params = new URL(href, location.href).searchParams;
 
-      // Action bar manual button
-      if (selfIsElement && isManualActionButton(this)) {
-        infoLog("Manual action button clicked -> POST GenerateDownloadUrl", {
-          href,
-        });
-        try {
-          if (event && typeof event.preventDefault === "function")
-            event.preventDefault();
-        } catch (_) {}
-        const button = this;
-        btnWait(button);
-        const section = document.getElementById("section");
-        const gameId = section ? section.dataset.gameId : this.current_game_id;
-        const fileId = getPrimaryFileId();
-        if (!fileId) {
-          btnError(button, {
-            message: "Could not determine file ID for download.",
-          });
-          console.groupEnd();
-          return;
-        }
-        const postData =
-          "fid=" +
-          encodeURIComponent(fileId) +
-          "&game_id=" +
-          encodeURIComponent(gameId || "");
-        ajaxRequest({
-          type: "POST",
-          url: "/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl",
-          data: postData,
-          headers: {
-            Origin: "https://www.nexusmods.com",
-            Referer: href,
-            "Sec-Fetch-Site": "same-origin",
-            "X-Requested-With": "XMLHttpRequest",
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-          },
-          success(data) {
-            debugLog(
-              "POST GenerateDownloadUrl response preview:",
-              String(data).slice(0, 1200)
-            );
-            if (!data) {
-              btnError(button, { message: "Empty response from server" });
-              console.groupEnd();
-              return;
-            }
-            let parsed = null;
-            try {
-              parsed = typeof data === "string" ? JSON.parse(data) : data;
-            } catch (e) {
-              btnError(button, { message: "Server response was not JSON" });
-              console.groupEnd();
-              return;
-            }
-            if (parsed && parsed.url) {
-              infoLog("Using parsed.url from POST", parsed.url);
-              btnSuccess(button);
-              try {
-                document.location.href = parsed.url;
-              } catch (_) {
-                window.location = parsed.url;
-              }
-              console.groupEnd();
-              return;
-            }
-            btnError(button, {
-              message: "No download URL returned from server",
-            });
-            console.groupEnd();
-          },
-          error(xhr) {
-            btnError(button, xhr);
-            console.groupEnd();
-          },
-        });
-        return;
-      }
-
       if (params.get("file_id")) {
         infoLog("file link clicked", { href });
         let button = event;
@@ -489,7 +370,7 @@
         const gameId = section ? section.dataset.gameId : this.current_game_id;
         let fileId = params.get("file_id") || params.get("id");
 
-        // NMM
+        // NMM 
         if (params.get("nmm")) {
           infoLog("nmm parameter present -> performing NMM GET extraction", {
             href,
@@ -534,6 +415,7 @@
                     } catch (_) {
                       window.location = downloadUrl;
                     }
+
                     console.groupEnd();
                     return;
                   } else {
@@ -559,6 +441,7 @@
                   } catch (_) {
                     window.location = parsed.url;
                   }
+
                   console.groupEnd();
                   return;
                 }
@@ -579,7 +462,7 @@
           return;
         }
 
-        // POST (non-nmm)
+        // POST ---> GenerateDownloadUrl
         const postOptions = {
           type: "POST",
           url: "/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl",
@@ -631,6 +514,7 @@
           },
         };
         ajaxRequest(postOptions);
+
         const popup = selfIsElement ? this.parentNode : null;
         if (popup && popup.classList.contains("popup")) {
           popup.getElementsByTagName("button")[0]?.click();
@@ -641,6 +525,8 @@
         }
         return;
       }
+
+      // mirror ModRequirementsPopUp id for element for later lookup
       if (/ModRequirementsPopUp/.test(href)) {
         const fileId = new URL(href, location.href).searchParams.get("id");
         if (fileId && selfIsElement) {
@@ -653,14 +539,6 @@
       try {
         if (this && this.dataset) delete this.dataset.nnwProcessing;
       } catch (_) {}
-      try {
-        if (window.nexusFlags?.isDLContentPopup) {
-          autoCloseDLContentError();
-        }
-      } catch (e) {
-        debugLog("autoCloseDLContentError trigger error", e);
-      }
-
       console.groupEnd();
     }
   }
@@ -681,7 +559,6 @@
           : null;
       if (!el) return;
 
-      // If another handler already marked the event as handled by NNW++ skip
       if (event && event.__nnw_nofollow) {
         debugLog("delegatedClickHandler: event already handled, skipping");
         return;
@@ -707,9 +584,8 @@
   }
 
   function autoClickRequiredFileDownload() {
-    let popupClicked = false; // ensure only click once per popup instance.
-
-    const observer = new MutationObserver((mutations) => {
+    let popupClicked = false;
+    const observer = new MutationObserver(() => {
       const popup = document.querySelector(".popup-mod-requirements");
       if (popup) {
         if (!popupClicked) {
@@ -730,34 +606,7 @@
       }
     });
 
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-  }
-
-  // auto-close for broken ModRequirementsPopUp error overlay that appears on some files
-  function autoCloseDLContentError(delayMs = 200) {
-    try {
-      const closeIf = () => {
-        const a = document.querySelector(
-          '.mfp-preloader a[href*="ModRequirementsPopUp"]'
-        );
-        if (!a) return false;
-        const wrap =
-          a.closest(".mfp-wrap") || document.querySelector(".mfp-wrap");
-        wrap?.querySelector(".mfp-close")?.click();
-        try {
-          wrap?.click();
-        } catch (_) {}
-        debugLog("autoCloseDLContentError: closed", { a, wrap });
-        return true;
-      };
-      if (closeIf()) return;
-      setTimeout(closeIf, delayMs);
-    } catch (e) {
-      debugLog("autoCloseDLContentError error", e);
-    }
+    observer.observe(document.body, { childList: true, subtree: true });
   }
 
   // Archived files: inject nmm=1 and Manual buttons
@@ -778,7 +627,6 @@
       a.href = href;
       a.dataset.fileid = fileId;
       a.tabIndex = 0;
-      // create svg use element as original does
       try {
         const svg = document.createElementNS(
           "http://www.w3.org/2000/svg",
@@ -841,7 +689,6 @@
         const section = downloadSections[idx];
         const fileId = fileHeaders[idx]?.getAttribute("data-id");
         if (!fileId) continue;
-        // skip if we already injected for this fileId into this section
         try {
           if (section.dataset && section.dataset.nnwInjected === fileId) {
             continue;
@@ -1066,6 +913,16 @@
     }
   }
 
+  function scrollToMainFiles() {
+    try {
+      if (!/\btab=files\b/.test(window.location.href)) return;
+      const header = document.querySelector(".file-category-header");
+      if (header) header.scrollIntoView();
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
   window.nexusConfig = {
     setFeature(name, value) {
       const old = config[name];
@@ -1108,16 +965,55 @@
     infoLog("Initializing main functions");
     archivedFile();
     document.body.addEventListener("click", delegatedClickHandler, true);
-
     try {
       getPrimaryFileId();
     } catch (e) {
       debugLog("initMainFunctions: getPrimaryFileId failed", e);
     }
-
     autoStartFileLink();
     if (config.skipRequirements) autoClickRequiredFileDownload();
+    setTimeout(() => {
+      try {
+        scrollToMainFiles();
+      } catch (e) {
+        /* ignore */
+      }
+    }, 200);
+    
   }
+
+  // URL Watcher
+  (() => {
+    let lastHref = location.href;
+    const CHECK_MS = 300;
+
+    setInterval(() => {
+      try {
+        if (location.href === lastHref) return;
+        lastHref = location.href;
+        debugLog("URL changed ---> running light init for changed tab", {
+          href: lastHref,
+        });
+        // only run lightweight operations needed on navigation:
+        if (isModPage()) {
+          try {
+            archivedFile();
+          } catch (e) {
+            debugLog("archivedFile error on URL change", e);
+          }
+          setTimeout(() => {
+            try {
+              scrollToMainFiles();
+            } catch (e) {
+              /* ignore */
+            }
+          }, 150);
+        }
+      } catch (e) {
+        debugLog("URL watcher error", e);
+      }
+    }, CHECK_MS);
+  })();
 
   let archivedDebounceTimer = null;
   const ARCHIVE_DEBOUNCE_MS = 200;
@@ -1125,7 +1021,6 @@
   const mainObserver = new MutationObserver((mutations) => {
     if (!isModPage()) return;
     try {
-      // prevents re-injection
       let touched = false;
       mutations.forEach((mutation) => {
         if (!mutation.addedNodes) return;
