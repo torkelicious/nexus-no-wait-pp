@@ -3,12 +3,13 @@
 // @description Download from nexusmods.com without wait (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
-// @version     1.1.11
+// @version     1.1.12
 // @include     https://*.nexusmods.com/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
 // @icon        https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
 // @grant       GM_xmlhttpRequest
+// @grant       GM.xmlHttpRequest
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       GM_deleteValue
@@ -19,7 +20,7 @@
 // @license     GPL-3.0-or-later
 // ==/UserScript==
 
-/* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM_info GM */
+/* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM.xmlHttpRequest, GM_info GM */
 
 (function () {
   const DEFAULT_CONFIG = {
@@ -161,14 +162,14 @@
   }
 
   // === AJAX wrapper ===
+  // Use Greasemonkey GM.xmlHttpRequest when present,
+  // otherwise GM_xmlhttpRequest fallback
   let ajaxRequestRaw;
-  if (typeof GM_xmlhttpRequest !== "undefined")
-    ajaxRequestRaw = GM_xmlhttpRequest;
-  else if (
-    typeof GM !== "undefined" &&
-    typeof GM.xmlHttpRequest !== "undefined"
-  )
+  if (typeof GM !== "undefined" && typeof GM.xmlHttpRequest === "function") {
     ajaxRequestRaw = GM.xmlHttpRequest;
+  } else if (typeof GM_xmlhttpRequest !== "undefined") {
+    ajaxRequestRaw = GM_xmlhttpRequest;
+  }
 
   function ajaxRequest(obj) {
     if (!ajaxRequestRaw) {
