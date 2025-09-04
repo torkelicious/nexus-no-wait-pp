@@ -172,7 +172,7 @@
 
   function ajaxRequest(obj) {
     if (!ajaxRequestRaw) {
-      logMessage("AJAX not available in this environment", true);
+      logMessage("AJAX not available in this environment (your userscript manager may not support this!)", true);
       return;
     }
     debugLog("ajaxRequest", {
