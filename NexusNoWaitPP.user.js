@@ -18,6 +18,8 @@
 // @connect     *.nexusmods.com
 // @connect     raw.githubusercontent.com
 // @license     GPL-3.0-or-later
+// @downloadURL https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.user.js
+// @updateURL https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.meta.js
 // ==/UserScript==
 
 /* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM.xmlHttpRequest, GM_info GM */
@@ -39,7 +41,7 @@
   // logging helpers
   function debugLog(...args) {
     try {
-      const prefix = "[Nexus No Wait ++]";
+      const prefix = "[ Nexus No Wait ++ | v" + GM_info.script.version + " ] ";
       (console.debug || console.log).call(
         console,
         prefix,
