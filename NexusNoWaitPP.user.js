@@ -3,7 +3,7 @@
 // @description Download from nexusmods.com without wait (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
-// @version     1.1.14
+// @version     1.1.15
 // @include     https://*.nexusmods.com/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -18,8 +18,6 @@
 // @connect     *.nexusmods.com
 // @connect     raw.githubusercontent.com
 // @license     GPL-3.0-or-later
-// @downloadURL https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.user.js
-// @updateURL https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.meta.js
 // ==/UserScript==
 
 /* global GM_getValue, GM_setValue, GM_deleteValue, GM_xmlhttpRequest, GM.xmlHttpRequest, GM_info GM */
@@ -38,41 +36,121 @@
 
   const RECENT_HANDLE_MS = 600;
 
-  // logging helpers
+// = = = = = unified logger = = = = =
+  const LOG_PREFIX =
+    "[ Nexus No Wait ++ | v" +
+    ((typeof GM_info !== "undefined" && GM_info?.script?.version) || "?.?.?") +
+    " ]\n";
+
+  const logger = {
+    debug(...args) {
+      try {
+        (console.debug || console.log).call(
+          console,
+          LOG_PREFIX,
+          "[debug]:",
+          ...args,
+          "\nPage:",
+          location.href,
+        );
+      } catch (e) {}
+    },
+    info(...args) {
+      try {
+        (console.info || console.log).call(
+          console,
+          LOG_PREFIX,
+          "[info]:",
+          ...args,
+          "\nPage:",
+          location.href,
+        );
+      } catch (e) {}
+    },
+    warn(...args) {
+      try {
+        (console.warn || console.log).call(
+          console,
+          LOG_PREFIX,
+          "[warn]:",
+          ...args,
+          "\nPage:",
+          location.href,
+        );
+      } catch (e) {}
+    },
+    error(...args) {
+      try {
+        (console.error || console.log).call(
+          console,
+          LOG_PREFIX,
+          "[error]:",
+          ...args,
+          "\nPage:",
+          location.href,
+        );
+      } catch (e) {}
+    },
+    groupCollapsed(...args) {
+      try {
+        (console.groupCollapsed || console.group || console.log).call(
+          console,
+          LOG_PREFIX,
+          ...args,
+        );
+      } catch (e) {}
+    },
+    groupEnd() {
+      try {
+        (console.groupEnd || (() => {})).call(console);
+      } catch (e) {}
+    },
+  };
+
+  //  wrappers kept for compatibility
+  // when config.debug is true debugLog will also show an alert.
   function debugLog(...args) {
     try {
-      const prefix = "[ Nexus No Wait ++ | v" + GM_info.script.version + " ] ";
-      (console.debug || console.log).call(
-        console,
-        prefix,
-        ...args,
-        "Page:",
-        window.location.href,
-      );
+      logger.debug(...args);
+      if (config && config.debug) {
+        try {
+          const out = args
+            .map((a) =>
+              typeof a === "string" ? a : JSON.stringify(a, replacerSafe),
+            )
+            .join(" ");
+          alert(LOG_PREFIX + " (Debug):\n" + out);
+        } catch (e) {
+          try {
+            alert(LOG_PREFIX + " (Debug):\n" + String(args));
+          } catch (_) {}
+        }
+      }
     } catch (e) {}
   }
   function infoLog(...args) {
     try {
-      (console.info || console.log).call(
-        console,
-        "[Nexus No Wait ++]",
-        ...args,
-        "Page:",
-        window.location.href,
-      );
+      logger.info(...args);
     } catch (e) {}
   }
   function errorLog(...args) {
     try {
-      (console.error || console.log).call(
-        console,
-        "[Nexus No Wait ++]",
-        ...args,
-        "Page:",
-        window.location.href,
-      );
+      logger.error(...args);
     } catch (e) {}
   }
+
+  // avoid circular JSON.stringify errors in debug alerts
+  function replacerSafe(key, value) {
+    if (typeof value === "object" && value !== null) {
+      try {
+        // large DOM nodes or window references
+        if (value instanceof Element) return "[DOM Element]";
+      } catch (_) {}
+    }
+    return value;
+  }
+
+  // --------------------------------------------------------------------------
 
   // === Settings management ===
   function validateSettings(settings) {
@@ -114,7 +192,7 @@
       }
       debugLog("Saved settings");
     } catch (e) {
-      console.error("Failed to save settings:", e);
+      errorLog("Failed to save settings:", e);
     }
   }
   const config = Object.assign({}, DEFAULT_CONFIG, loadSettings());
@@ -137,7 +215,7 @@
   function logMessage(message, showAlert = false, isDebug = false) {
     if (isDebug) {
       debugLog(message);
-      if (config.debug) alert("[Nexus No Wait ++] (Debug):\n" + message);
+      if (config.debug) alert(LOG_PREFIX + " (Debug):\n" + message);
       return;
     }
     playErrorSound();
@@ -314,7 +392,7 @@
           "file_id",
         );
         if (fid) {
-          debugLog("getPrimaryFileId found via any file link", fid);
+          debugLog("getPrimaryFileId found via anyFileLink", fid);
           return fid;
         }
       }
@@ -324,7 +402,7 @@
       if (header) {
         const fid = header.getAttribute("data-id");
         if (fid) {
-          debugLog("getPrimaryFileId found via header", fid);
+          debugLog("getPrimaryFileId found via file-expander-header", fid);
           return fid;
         }
       }
@@ -350,13 +428,13 @@
 
   // === MAIN DOWNLOAD HANDLER ===
   function clickListener(event) {
-    console.groupCollapsed("[NNW++] clickListener");
+    logger.groupCollapsed("[NNW++] clickListener");
 
     // duplicate-handling guard
     try {
       if (this && this.dataset && this.dataset.nnwHandled === "1") {
         debugLog("Element recently handled, skipping duplicate");
-        console.groupEnd();
+        logger.groupEnd();
         return;
       }
       try {
@@ -430,7 +508,7 @@
               btnError(button, {
                 message: "Empty response from server",
               });
-              console.groupEnd();
+              logger.groupEnd();
               return;
             }
             // first JSON parse
@@ -448,7 +526,7 @@
               } catch (_) {
                 window.location = parsed.url;
               }
-              console.groupEnd();
+              logger.groupEnd();
               return;
             }
 
@@ -465,7 +543,7 @@
               } catch (_) {
                 window.location = regexUrl;
               }
-              console.groupEnd();
+              logger.groupEnd();
               return;
             }
 
@@ -473,11 +551,11 @@
               message:
                 "No download URL returned from server\n\n(Are you logged in?)",
             });
-            console.groupEnd();
+            logger.groupEnd();
           },
           error(xhr) {
             btnError(button, xhr);
-            console.groupEnd();
+            logger.groupEnd();
           },
         };
 
@@ -504,7 +582,7 @@
                 btnError(button, {
                   message: "Empty response from server",
                 });
-                console.groupEnd();
+                logger.groupEnd();
                 return;
               }
               try {
@@ -528,7 +606,7 @@
                     } catch (_) {
                       window.location = downloadUrl;
                     }
-                    console.groupEnd();
+                    logger.groupEnd();
                     return;
                   } else {
                     // if the slow button exists but no data attr continue to fallbacks
@@ -553,7 +631,7 @@
                   } catch (_) {
                     window.location = parsed.url;
                   }
-                  console.groupEnd();
+                  logger.groupEnd();
                   return;
                 }
 
@@ -570,7 +648,7 @@
                   } catch (_) {
                     window.location = regexUrl;
                   }
-                  console.groupEnd();
+                  logger.groupEnd();
                   return;
                 }
 
@@ -582,12 +660,12 @@
                 ajaxRequest(postOptions);
               } catch (e) {
                 btnError(button, e);
-                console.groupEnd();
+                logger.groupEnd();
               }
             },
             error(xhr) {
               btnError(button, xhr);
-              console.groupEnd();
+              logger.groupEnd();
             },
           });
           return;
@@ -619,7 +697,7 @@
       try {
         if (this && this.dataset) delete this.dataset.nnwProcessing;
       } catch (_) {}
-      console.groupEnd();
+      logger.groupEnd();
     }
   }
 
@@ -971,25 +1049,9 @@
   }
 
   function setupDebugMode() {
+    // Stop monkeypatching console; we use logger and debugLog to surface alerts when config.debug is enabled.
     if (config.debug) {
-      const originalConsole = {
-        log: console.log,
-        warn: console.warn,
-        error: console.error,
-      };
-      console.log = function () {
-        originalConsole.log.apply(console, arguments);
-        alert("[Debug Log]\n" + Array.from(arguments).join(" "));
-      };
-      console.warn = function () {
-        originalConsole.warn.apply(console, arguments);
-        alert("[Debug Warn]\n" + Array.from(arguments).join(" "));
-      };
-      console.error = function () {
-        originalConsole.error.apply(console, arguments);
-        alert("[Debug Error]\n" + Array.from(arguments).join(" "));
-      };
-      infoLog("Debug mode enabled");
+      infoLog("Debug mode enabled (alerts will be shown for debug logs).");
     }
   }
 
