@@ -871,8 +871,8 @@
   // -------------------------------- UI --------------------------------
   const SETTING_UI = {
     autoCloseTab: {
-      name: "Auto-Close tab on download",
-      description: "Automatically close tab after download starts",
+      name: "Auto-Close on file_id= tabs after download starts",
+      description: "Automatically close tab after download starts on file_id= URLs\nPleae change the Auto-Close Tab Delay if it is closing too soon",
     },
     skipRequirements: {
       name: "Skip Requirements Popup/Tab",
