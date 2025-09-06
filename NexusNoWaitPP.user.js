@@ -3,7 +3,7 @@
 // @description Download from nexusmods.com without wait (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
-// @version     1.1.15
+// @version     1.1.16
 // @include     https://*.nexusmods.com/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -36,7 +36,7 @@
 
   const RECENT_HANDLE_MS = 600;
 
-// = = = = = unified logger = = = = =
+  // = = = = = unified logger = = = = =
   const LOG_PREFIX =
     "[ Nexus No Wait ++ | v" +
     ((typeof GM_info !== "undefined" && GM_info?.script?.version) || "?.?.?") +
@@ -51,7 +51,7 @@
           "[debug]:",
           ...args,
           "\nPage:",
-          location.href,
+          location.href
         );
       } catch (e) {}
     },
@@ -63,7 +63,7 @@
           "[info]:",
           ...args,
           "\nPage:",
-          location.href,
+          location.href
         );
       } catch (e) {}
     },
@@ -75,7 +75,7 @@
           "[warn]:",
           ...args,
           "\nPage:",
-          location.href,
+          location.href
         );
       } catch (e) {}
     },
@@ -87,7 +87,7 @@
           "[error]:",
           ...args,
           "\nPage:",
-          location.href,
+          location.href
         );
       } catch (e) {}
     },
@@ -96,7 +96,7 @@
         (console.groupCollapsed || console.group || console.log).call(
           console,
           LOG_PREFIX,
-          ...args,
+          ...args
         );
       } catch (e) {}
     },
@@ -116,7 +116,7 @@
         try {
           const out = args
             .map((a) =>
-              typeof a === "string" ? a : JSON.stringify(a, replacerSafe),
+              typeof a === "string" ? a : JSON.stringify(a, replacerSafe)
             )
             .join(" ");
           alert(LOG_PREFIX + " (Debug):\n" + out);
@@ -199,7 +199,7 @@
 
   // Error sound
   const errorSound = new Audio(
-    "https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/errorsound.mp3",
+    "https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/errorsound.mp3"
   );
   try {
     errorSound.load();
@@ -229,28 +229,111 @@
     if (!text) return null;
     text = String(text);
 
+    // the new website version regex const downloadUrl = '...'
+    let m = text.match(/const downloadUrl = '([^']+)'/);
+    if (m && m[1]) {
+      debugLog(
+        "extractDownloadUrlTxt: Found new website version pattern (const downloadUrl = '...')"
+      );
+      return m[1].replace(/&amp;/g, "&");
+    }
+
+    // old website version regex id="slowDownloadButton" ... data-download-url="..."
+    m = text.match(/id="slowDownloadButton".*?data-download-url="([^"]+)"/);
+    if (m && m[1]) {
+      debugLog(
+        "extractDownloadUrlTxt: Found slowDownloadButton data-download-url attribute"
+      );
+      return m[1].replace(/&amp;/g, "&");
+    }
+
     // common JS assignment patterns (const|let|var downloadUrl = '...';)
-    let m = text.match(/(?:const|let|var)\s+downloadUrl\s*=\s*(['"])(.*?)\1/);
-    if (m && m[2]) return m[2].replace(/&amp;/g, "&");
+    m = text.match(/(?:const|let|var)\s+downloadUrl\s*=\s*(['"])(.*?)\1/);
+    if (m && m[2]) {
+      debugLog(
+        "extractDownloadUrlTxt: Matched JS assignment pattern for downloadUrl"
+      );
+      return m[2].replace(/&amp;/g, "&");
+    }
 
     // generic key:value or key = '...' patterns (downloadUrl: '...' or downloadUrl = "...")
     m = text.match(/downloadUrl\s*[:=]\s*(['"])(.*?)\1/);
-    if (m && m[2]) return m[2].replace(/&amp;/g, "&");
+    if (m && m[2]) {
+      debugLog(
+        "extractDownloadUrlTxt: Matched generic downloadUrl key/value pattern"
+      );
+      return m[2].replace(/&amp;/g, "&");
+    }
 
     // data-download-url attribute in raw HTML
     m = text.match(/data-download-url\s*=\s*(['"])(.*?)\1/);
-    if (m && m[2]) return m[2].replace(/&amp;/g, "&");
+    if (m && m[2]) {
+      debugLog(
+        "extractDownloadUrlTxt: Matched data-download-url attribute in HTML"
+      );
+      return m[2].replace(/&amp;/g, "&");
+    }
 
     // loose search for tokenized download URL containing "/download/"
     m = text.match(/https?:\/\/[^"'<>\\\s]+\/download\/[^"'<>\\\s]*/i);
-    if (m && m[0]) return m[0].replace(/&amp;/g, "&");
+    if (m && m[0]) {
+      debugLog("extractDownloadUrlTxt: Matched loose /download/ URL token");
+      return m[0].replace(/&amp;/g, "&");
+    }
 
     // nxm:// link anywhere
     m = text.match(/(nxm:\/\/[^\s"'<>]+)/i);
-    if (m && m[1]) return m[1];
+    if (m && m[1]) {
+      debugLog("extractDownloadUrlTxt: Matched nxm:// link");
+      return m[1];
+    }
 
     return null;
   }
+
+  // unescape JSON escaped content for the text extractor when JSON.parse is skipped/failed.
+  function tryjMatchUnescape(body) {
+    if (!body) return "";
+    body = String(body);
+
+    // If there is a JSON like "url" field decode that part with JSON.parse
+    try {
+      const jMatch = body.match(/["']url["']\s*:\s*(['"])(.*?)\1/);
+      if (jMatch && jMatch[2]) {
+        try {
+          // rewrap and JSON.parse only the captured part to decode escapes reliably
+          const decodedFragment = JSON.parse(jMatch[1] + jMatch[2] + jMatch[1]);
+          if (typeof decodedFragment === "string" && decodedFragment) {
+            return String(decodedFragment);
+          }
+        } catch (e) {
+          // fall through to broader unescape below
+          debugLog(
+            "tryjMatchUnescape: failed to JSON.parse fragment, will fallback to simple unescape",
+            e
+          );
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    //    Broad unescape for common JSON escapes so the text extractor regexes can match
+    //    Handle common sequences to make regex matching more likely
+    try {
+      return body
+        .replace(/\\\//g, "/")
+        .replace(/\\"/g, '"')
+        .replace(/\\'/g, "'")
+        .replace(/\\\\/g, "\\")
+        .replace(/\\n/g, "\n")
+        .replace(/\\r/g, "\r")
+        .replace(/\\t/g, "\t");
+    } catch (e) {
+      return body;
+    }
+  }
+
   // -------------------------------------------------------------------------
 
   // Skip requirements tab
@@ -260,7 +343,7 @@
   ) {
     const newUrl = window.location.href.replace(
       "tab=requirements",
-      "tab=files",
+      "tab=files"
     );
     infoLog("Skipping requirements tab -> files", {
       from: window.location.href,
@@ -284,7 +367,7 @@
     if (!ajaxRequestRaw) {
       logMessage(
         "AJAX not available in this environment (your userscript manager may not support this!)",
-        true,
+        true
       );
       return;
     }
@@ -343,7 +426,7 @@
     } catch (e) {
       logMessage(
         "Unknown error while handling button error: " + e.message,
-        true,
+        true
       );
     }
   }
@@ -373,11 +456,11 @@
     try {
       // action-nmm link (vortex)
       const vortexAction = document.querySelector(
-        '#action-nmm a[href*="file_id="]',
+        '#action-nmm a[href*="file_id="]'
       );
       if (vortexAction) {
         const fid = new URL(vortexAction.href, location.href).searchParams.get(
-          "file_id",
+          "file_id"
         );
         if (fid) {
           debugLog("getPrimaryFileId found via action-nmm", fid);
@@ -389,7 +472,7 @@
       const anyFileLink = document.querySelector('a[href*="file_id="]');
       if (anyFileLink) {
         const fid = new URL(anyFileLink.href, location.href).searchParams.get(
-          "file_id",
+          "file_id"
         );
         if (fid) {
           debugLog("getPrimaryFileId found via anyFileLink", fid);
@@ -502,7 +585,7 @@
           success(data) {
             debugLog(
               "file link POST response preview:",
-              String(data).slice(0, 1200),
+              String(data).slice(0, 1200)
             );
             if (!data) {
               btnError(button, {
@@ -511,6 +594,7 @@
               logger.groupEnd();
               return;
             }
+
             // first JSON parse
             let parsed = null;
             try {
@@ -519,7 +603,7 @@
               parsed = null;
             }
             if (parsed && parsed.url) {
-              infoLog("Using parsed.url from POST", parsed.url);
+              infoLog("Using JSON parsed.url from POST response", parsed.url);
               btnSuccess(button);
               try {
                 document.location.href = parsed.url;
@@ -530,21 +614,82 @@
               return;
             }
 
-            // fallback to loose text extraction (nxm/http or embedded JS)
-            const regexUrl = extractDownloadUrlTxt(String(data));
-            if (regexUrl) {
-              infoLog(
-                "Falling back to text-extracted URL from POST response",
-                regexUrl,
+            // JSON parse was skipped or failed try jMatch unescape + text extractor
+            try {
+              debugLog(
+                "POST: attempting jMatch unescape + text-extractor fallback"
               );
-              btnSuccess(button);
-              try {
-                document.location.href = regexUrl;
-              } catch (_) {
-                window.location = regexUrl;
+              const body = String(data);
+              const unescaped =
+                typeof tryjMatchUnescape === "function"
+                  ? tryjMatchUnescape(body)
+                  : body.replace(/\\\//g, "/");
+
+              debugLog(
+                "POST: unescaped body preview:",
+                unescaped.slice(0, 200)
+              );
+
+              // if unescaped is a raw URL use it immediately
+              if (/^(https?:\/\/|nxm:\/\/)/i.test(unescaped.trim())) {
+                const url = unescaped.trim().replace(/&amp;/g, "&");
+                debugLog(
+                  "POST: unescaped content is direct URL; navigating to:",
+                  url
+                );
+                btnSuccess(button);
+                try {
+                  document.location.href = url;
+                } catch (_) {
+                  window.location = url;
+                }
+                logger.groupEnd();
+                return;
               }
-              logger.groupEnd();
-              return;
+
+              // Otherwise try extractor on unescaped content first
+              let regexUrl = null;
+              try {
+                regexUrl = extractDownloadUrlTxt(unescaped);
+                debugLog(
+                  "POST: text-extractor matched URL on unescaped content:",
+                  regexUrl
+                );
+              } catch (e) {
+                debugLog("POST: text-extractor threw on unescaped content", e);
+              }
+
+              // Fallback extractor on original body
+              if (!regexUrl) {
+                try {
+                  regexUrl = extractDownloadUrlTxt(body);
+                  debugLog(
+                    "POST: text-extractor matched URL on original body:",
+                    regexUrl
+                  );
+                } catch (e) {
+                  debugLog("POST: text-extractor threw on original body", e);
+                }
+              }
+
+              if (regexUrl) {
+                infoLog(
+                  "Using text-extracted URL from POST response (after unescape fallback)",
+                  regexUrl
+                );
+                btnSuccess(button);
+                try {
+                  document.location.href = regexUrl;
+                } catch (_) {
+                  window.location = regexUrl;
+                }
+                logger.groupEnd();
+                return;
+              }
+
+              debugLog("POST: unescape + text-extractor returned no URL");
+            } catch (e) {
+              debugLog("POST: unescape+extract fallback failed", e);
             }
 
             btnError(button, {
@@ -576,7 +721,7 @@
             success(data) {
               debugLog(
                 "NMM GET response preview:",
-                String(data).slice(0, 1200),
+                String(data).slice(0, 1200)
               );
               if (!data) {
                 btnError(button, {
@@ -588,7 +733,7 @@
               try {
                 const doc = new DOMParser().parseFromString(
                   String(data),
-                  "text/html",
+                  "text/html"
                 );
                 const slow =
                   doc.getElementById("slowDownloadButton") ||
@@ -599,7 +744,10 @@
                     (slow.dataset && slow.dataset.downloadUrl) ||
                     slow.href;
                   if (downloadUrl) {
-                    infoLog("Found data-download-url (NMM)", downloadUrl);
+                    infoLog(
+                      "Found data-download-url attribute in slowDownloadButton (NMM)",
+                      downloadUrl
+                    );
                     btnSuccess(button);
                     try {
                       document.location.href = downloadUrl;
@@ -611,7 +759,7 @@
                   } else {
                     // if the slow button exists but no data attr continue to fallbacks
                     debugLog(
-                      "slowDownloadButton found but no data-download-url attr",
+                      "slowDownloadButton found but no data-download-url attr"
                     );
                   }
                 }
@@ -624,7 +772,10 @@
                   parsed = null;
                 }
                 if (parsed && parsed.url) {
-                  infoLog("Found parsed.url in NMM GET response", parsed.url);
+                  infoLog(
+                    "Using JSON parsed.url from NMM GET response",
+                    parsed.url
+                  );
                   btnSuccess(button);
                   try {
                     document.location.href = parsed.url;
@@ -635,27 +786,96 @@
                   return;
                 }
 
-                // try text based extraction
-                const regexUrl = extractDownloadUrlTxt(String(data));
-                if (regexUrl) {
-                  infoLog(
-                    "Found download URL via text extraction (NMM GET)",
-                    regexUrl,
+                // JSON parse was skipped or failed try jMatch unescape + w. extraction
+                try {
+                  debugLog(
+                    "NMM GET: attempting jMatch unescape + text-extractor fallback"
                   );
-                  btnSuccess(button);
-                  try {
-                    document.location.href = regexUrl;
-                  } catch (_) {
-                    window.location = regexUrl;
+                  const body = String(data);
+                  const unescaped =
+                    typeof tryjMatchUnescape === "function"
+                      ? tryjMatchUnescape(body)
+                      : body.replace(/\\\//g, "/");
+
+                  debugLog(
+                    "NMM GET: unescaped body preview:",
+                    unescaped.slice(0, 200)
+                  );
+
+                  // if unescaped is a plain URL
+                  if (/^(https?:\/\/|nxm:\/\/)/i.test(unescaped.trim())) {
+                    const url = unescaped.trim().replace(/&amp;/g, "&");
+                    debugLog(
+                      "NMM GET: unescaped content is direct URL; navigating to:",
+                      url
+                    );
+                    btnSuccess(button);
+                    try {
+                      document.location.href = url;
+                    } catch (_) {
+                      window.location = url;
+                    }
+                    logger.groupEnd();
+                    return;
                   }
-                  logger.groupEnd();
-                  return;
+
+                  // try extractor on unescaped content first
+                  let regexUrl = null;
+                  try {
+                    regexUrl = extractDownloadUrlTxt(unescaped);
+                    debugLog(
+                      "NMM GET: text-extractor matched URL on unescaped content:",
+                      regexUrl
+                    );
+                  } catch (e) {
+                    debugLog(
+                      "NMM GET: text-extractor threw on unescaped content",
+                      e
+                    );
+                  }
+
+                  // fallback to extractor on original body
+                  if (!regexUrl) {
+                    try {
+                      regexUrl = extractDownloadUrlTxt(body);
+                      debugLog(
+                        "NMM GET: text-extractor matched URL on original body:",
+                        regexUrl
+                      );
+                    } catch (e) {
+                      debugLog(
+                        "NMM GET: text-extractor threw on original body",
+                        e
+                      );
+                    }
+                  }
+
+                  if (regexUrl) {
+                    infoLog(
+                      "Using text-extracted URL from NMM GET response (after unescape fallback)",
+                      regexUrl
+                    );
+                    btnSuccess(button);
+                    try {
+                      document.location.href = regexUrl;
+                    } catch (_) {
+                      window.location = regexUrl;
+                    }
+                    logger.groupEnd();
+                    return;
+                  }
+
+                  debugLog(
+                    "NMM GET: unescape + text-extractor returned no URL"
+                  );
+                } catch (e) {
+                  debugLog("NMM GET: unescape+extract fallback failed", e);
                 }
 
-                // last fallback to call the POST GenerateDownloadUrl (same as manual)
+                // fallback to call the POST GenerateDownloadUrl (same as manual)
                 debugLog(
-                  "NMM GET: no URL found, falling back to GenerateDownloadUrl POST for fid=" +
-                    fileId,
+                  "NMM GET: no URL found after fallbacks; calling GenerateDownloadUrl POST for fid=" +
+                    fileId
                 );
                 ajaxRequest(postOptions);
               } catch (e) {
@@ -788,20 +1008,20 @@
       try {
         const svg = document.createElementNS(
           "http://www.w3.org/2000/svg",
-          "svg",
+          "svg"
         );
         svg.setAttribute(
           "class",
-          "icon " + (isNmm ? "icon-nmm" : "icon-manual"),
+          "icon " + (isNmm ? "icon-nmm" : "icon-manual")
         );
         const use = document.createElementNS(
-          "http://www.w3.org/2000/svg",
-          "use",
+          "http://www.w3.org/1999/xlink",
+          "use"
         );
         use.setAttributeNS(
           "http://www.w3.org/1999/xlink",
           "xlink:href",
-          isNmm ? ICON_PATHS.nmm : ICON_PATHS.manual,
+          isNmm ? ICON_PATHS.nmm : ICON_PATHS.manual
         );
         svg.appendChild(use);
         a.appendChild(svg);
@@ -821,10 +1041,10 @@
     };
 
     const nmmHref = `${path}?tab=files&file_id=${encodeURIComponent(
-      fileId,
+      fileId
     )}&nmm=1`;
     const manualHref = `${path}?tab=files&file_id=${encodeURIComponent(
-      fileId,
+      fileId
     )}`;
 
     fragment.appendChild(makeBtn(nmmHref, "Vortex", true));
@@ -837,10 +1057,10 @@
       if (!window.location.href.includes("category=archived")) return;
 
       const downloadSections = Array.from(
-        document.querySelectorAll(".accordion-downloads"),
+        document.querySelectorAll(".accordion-downloads")
       );
       const fileHeaders = Array.from(
-        document.querySelectorAll(".file-expander-header"),
+        document.querySelectorAll(".file-expander-header")
       );
 
       for (let idx = 0; idx < downloadSections.length; idx++) {
@@ -872,7 +1092,8 @@
   const SETTING_UI = {
     autoCloseTab: {
       name: "Auto-Close on file_id= tabs after download starts",
-      description: "Automatically close tab after download starts on file_id= URLs\nPleae change the Auto-Close Tab Delay if it is closing too soon",
+      description:
+        "Automatically close tab after download starts on file_id= URLs\nPleae change the Auto-Close Tab Delay if it is closing too soon",
     },
     skipRequirements: {
       name: "Skip Requirements Popup/Tab",
@@ -946,7 +1167,7 @@
             } data-setting="${key}">
             <span>${name}</span>
           </label>
-        </div>`,
+        </div>`
       )
       .join("");
     const numberSettings = Object.entries(SETTING_UI)
@@ -958,7 +1179,7 @@
             <span>${name}:</span>
             <input type="number" value="${config[key]}" min="0" step="100" data-setting="${key}" style="${STYLES.input};width:120px;">
           </label>
-        </div>`,
+        </div>`
       )
       .join("");
     const advancedSection = `
