@@ -29,7 +29,7 @@
         showAlerts: true,
         refreshOnError: false,
         requestTimeout: 30000,
-        closeTabTime: 1000,
+        closeTabTime: 2000,
         debug: false,
         playErrorSound: true,
     };
