@@ -3,7 +3,7 @@
 // @description Download from nexusmods.com without wait (Manual/Vortex/MO2/NMM), Tweaked with extra features.
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
-// @version     1.1.17
+// @version     1.1.18
 // @include     https://*.nexusmods.com/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -32,6 +32,7 @@
         closeTabTime: 2000,
         debug: false,
         playErrorSound: true,
+        hidePremiumUpsells: false,
     };
 
     const RECENT_HANDLE_MS = 600;
@@ -1158,6 +1159,62 @@
         }
     }
 
+    // -------------------------------- Premium upsell/ads blocker --------------------------------
+    const PREMIUM_HIDE_SELECTORS = [
+        // IDs
+        '#nonPremiumBanner',
+        '#freeTrialBanner',
+        '#ig-banner-container',
+
+        // Partial class matches
+        '[class*="ads-bottom"]',
+        '[class*="ads-top"]',
+        '[class*="to-premium"]',
+        '[class*="from-premium"]',
+        '[class*="premium"]',
+
+        // Generic flex/space containers that match banners
+        '.space-y-16 > .justify-center.items-center.flex',
+
+        '.md\\:flex.py-2.bg-surface-low.border-stroke-subdued.border-b.gap-x-4.justify-center.items-center.hidden',
+        '.py-2.bg-surface-low.border-stroke-subdued.border-y.gap-x-4.justify-center.items-center.flex',
+    ];
+
+    let premiumUpsellStyleEl = null;
+
+    function buildPremiumHideCSS() {
+        return PREMIUM_HIDE_SELECTORS.map(sel => `${sel}{display:none !important;}`).join("\n");
+    }
+
+    function enablePremiumUpsellBlocker() {
+        try {
+            if (premiumUpsellStyleEl) return;
+            premiumUpsellStyleEl = document.createElement("style");
+            premiumUpsellStyleEl.setAttribute("data-nnw-premium-blocker", "1");
+            premiumUpsellStyleEl.textContent = buildPremiumHideCSS();
+            (document.head || document.documentElement).appendChild(premiumUpsellStyleEl);
+            debugLog("Premium upsell/ads blocker enabled");
+        } catch (e) {
+            debugLog("Failed to enable premium upsell blocker", e);
+        }
+    }
+    function disablePremiumUpsellBlocker() {
+        try {
+            if (premiumUpsellStyleEl && premiumUpsellStyleEl.parentNode) {
+                premiumUpsellStyleEl.parentNode.removeChild(premiumUpsellStyleEl);
+            }
+            premiumUpsellStyleEl = null;
+            debugLog("Premium upsell/ads blocker disabled");
+        } catch (e) {
+            debugLog("Failed to disable premium upsell blocker", e);
+        }
+    }
+
+    function applyPremiumUpsellSetting() {
+        if (config.hidePremiumUpsells) enablePremiumUpsellBlocker();
+        else disablePremiumUpsellBlocker();
+    }
+
     // -------------------------------- UI --------------------------------
     const SETTING_UI = {
         autoCloseTab: {
@@ -1193,6 +1250,11 @@
         playErrorSound: {
             name: "Play Error Sound",
             description: "Play a sound when errors occur",
+        },
+
+        hidePremiumUpsells: {
+            name: "Hide Premium Upsells & misc Ads (experimental)",
+            description: "Hides Nexus premium upsell banners, trial banners, and common ad containers across the site",
         },
     };
 
@@ -1391,8 +1453,10 @@
             return config;
         },
     };
+
     function applySettings() {
         setupDebugMode();
+        applyPremiumUpsellSetting();
     }
 
     // Initialization
