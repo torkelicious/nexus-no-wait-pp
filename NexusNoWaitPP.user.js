@@ -1275,7 +1275,7 @@
     },
     debug: {
       name: "⚠️ Debug Alerts",
-      description: "Show all console logs as alerts",
+      description: "Show all console logs as alerts (NOT RECOMMENDED!)",
     },
     playErrorSound: {
       name: "Play Error Sound",
