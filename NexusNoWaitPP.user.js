@@ -3,7 +3,7 @@
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
-// @version     1.1.20
+// @version     1.1.21
 // @include     https://*.nexusmods.com/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -1275,7 +1275,7 @@
     },
     debug: {
       name: "⚠️ Debug Alerts",
-      description: "Show all console logs as alerts (NOT RECOMMENDED!)",
+      description: "Show all console logs as alerts",
     },
     playErrorSound: {
       name: "Play Error Sound",
@@ -1309,7 +1309,11 @@
   };
 
   function createSettingsUI() {
+    const ID = "nnw-settings-toggle";
+    if (document.getElementById(ID)) return;
+
     const btn = document.createElement("div");
+    btn.id = ID;
     btn.innerHTML = "NexusNoWait++ ⚙️";
     btn.style.cssText = STYLES.button;
     btn.onmouseover = () => (btn.style.transform = "translateY(-2px)");
@@ -1319,7 +1323,34 @@
         closeSettingsModal();
       } else showSettingsModal();
     };
+
+    // attach to document.body
     document.body.appendChild(btn);
+
+    /*
+     * watch for removal and put it back instantly
+     * for some fucking reason this only seems to happen on firefox recently even though it seems to be a react thing
+     * just what the fuck?
+     */
+    const observer = new MutationObserver((mutations) => {
+      let removed = false;
+      for (const m of mutations) {
+        if (m.removedNodes) {
+          for (const n of m.removedNodes) {
+            if (n.id === ID) {
+              removed = true;
+              break;
+            }
+          }
+        }
+      }
+      if (removed) {
+        debugLog("Settings button wiped by site. Resurrecting...");
+        document.body.appendChild(btn);
+      }
+    });
+
+    observer.observe(document.body, { childList: true });
   }
 
   function generateSettingsHTML() {
