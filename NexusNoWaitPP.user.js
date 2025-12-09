@@ -3,7 +3,7 @@
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
-// @version     1.1.19
+// @version     1.1.20
 // @include     https://*.nexusmods.com/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -1275,7 +1275,7 @@
     },
     debug: {
       name: "⚠️ Debug Alerts",
-      description: "Show all console logs as alerts",
+      description: "Show all console logs as alerts (NOT RECOMMENDED!)",
     },
     playErrorSound: {
       name: "Play Error Sound",
@@ -1296,6 +1296,7 @@
   const STYLES = {
     button: `position:fixed;bottom:20px;right:20px;background:#2f2f2f;color:#fff;padding:10px 15px;border-radius:4px;cursor:pointer;z-index:9999;font-family:'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:14px;border:none;`,
     modal: `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2f2f2f;color:#dadada;padding:25px;border-radius:4px;z-index:10000;min-width:300px;max-width:90%;max-height:90vh;overflow-y:auto;font-family:'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;`,
+    backdrop: `position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.5);z-index:9999;`,
     section: `background:#363636;padding:15px;border-radius:4px;margin-bottom:15px;`,
     sectionHeader: `color:#da8e35;margin:0 0 10px 0;font-size:16px;font-weight:500;`,
     input: `background:#2f2f2f;border:1px solid #444;color:#dadada;border-radius:3px;padding:5px;`,
@@ -1303,6 +1304,7 @@
       primary: `padding:8px 15px;border:none;background:#da8e35;color:white;border-radius:3px;cursor:pointer;`,
       secondary: `padding:8px 15px;border:1px solid #da8e35;background:transparent;color:#da8e35;border-radius:3px;cursor:pointer;`,
       advanced: `padding:4px 8px;background:transparent;color:#666;border:none;cursor:pointer;`,
+      closeX: `position:absolute;top:10px;right:10px;background:transparent;border:none;color:#fff;font-size:18px;cursor:pointer;line-height:1;padding:5px;`,
     },
   };
 
@@ -1314,9 +1316,7 @@
     btn.onmouseout = () => (btn.style.transform = "translateY(0)");
     btn.onclick = () => {
       if (activeModal) {
-        activeModal.remove();
-        activeModal = null;
-        if (settingsChanged) location.reload();
+        closeSettingsModal();
       } else showSettingsModal();
     };
     document.body.appendChild(btn);
@@ -1378,6 +1378,7 @@
         </div>
       </div>`;
     return `
+      <button id="closeSettingsX" style="${STYLES.btn.closeX}" title="Close">✕</button>
       <h3 style="${STYLES.sectionHeader}">NexusNoWait++ Settings</h3>
       <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Features</h4>${normalBooleanSettings}</div>
       <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Timing</h4>${numberSettings}</div>
@@ -1392,11 +1393,39 @@
   }
 
   let activeModal = null;
+  let activeBackdrop = null;
   let settingsChanged = false;
 
-  function showSettingsModal() {
+  function closeSettingsModal() {
     if (activeModal) activeModal.remove();
+    if (activeBackdrop) activeBackdrop.remove();
+    document.removeEventListener("keydown", onSettingsKeyDown);
+    activeModal = null;
+    activeBackdrop = null;
+    if (settingsChanged) location.reload();
+  }
+
+  function onSettingsKeyDown(e) {
+    if (e.key === "Escape") {
+      closeSettingsModal();
+    }
+  }
+
+  function showSettingsModal() {
+    if (activeModal) closeSettingsModal();
     settingsChanged = false;
+
+    // create backdrop for settings modal
+    const backdrop = document.createElement("div");
+    backdrop.style.cssText = STYLES.backdrop;
+    backdrop.onclick = (e) => {
+      // close if clicking on the backdrop
+      if (e.target === backdrop) closeSettingsModal();
+    };
+
+    document.body.appendChild(backdrop);
+    activeBackdrop = backdrop;
+
     const modal = document.createElement("div");
     modal.style.cssText = STYLES.modal;
     modal.innerHTML = generateSettingsHTML();
@@ -1438,17 +1467,17 @@
         updateSetting(e.target);
     });
 
+    modal.querySelector("#closeSettingsX").onclick = () => {
+      closeSettingsModal();
+    };
     modal.querySelector("#closeSettings").onclick = () => {
-      modal.remove();
-      activeModal = null;
-      if (settingsChanged) location.reload();
+      closeSettingsModal();
     };
     modal.querySelector("#resetSettings").onclick = () => {
       settingsChanged = true;
       window.nexusConfig.reset();
       saveSettings(config);
-      modal.remove();
-      activeModal = null;
+      closeSettingsModal();
       location.reload();
     };
     modal.querySelector("#toggleAdvanced").onclick = (e) => {
@@ -1460,6 +1489,9 @@
 
     document.body.appendChild(modal);
     activeModal = modal;
+
+    // listen for escape key
+    document.addEventListener("keydown", onSettingsKeyDown);
   }
 
   function setupDebugMode() {
