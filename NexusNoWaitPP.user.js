@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
-// @description Download from nexusmods.com without wait (Manual/Vortex/MO2/NMM), Tweaked with extra features.
+// @description Skip Countdown, Auto Download, and More for Nexus Mods.
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @version     1.1.18
