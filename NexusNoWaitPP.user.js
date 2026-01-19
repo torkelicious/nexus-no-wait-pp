@@ -3,7 +3,7 @@
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
-// @version     1.1.21
+// @version     1.1.22
 // @include     https://*.nexusmods.com/*
 // @run-at      document-idle
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -946,6 +946,8 @@
         "#action-nmm a",
         'a[href*="file_id="]',
         "a.btn",
+        "button.nxm-button-secondary-filled-weak",
+        "button.nxm-button" // broader nxm-button match incase site fucks things up again
       ].join(",");
       const el =
         event.target && event.target.closest
