@@ -23,6 +23,12 @@
   const DEFAULTS = {
     AutoStartDownload: true,
     AutoCloseTab: true,
+    SkipRequirements: true,
+    RefreshOnError: false,
+    PlayErrorSound: true,
+    ErrorSoundUrl:
+      "https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/errorsound.mp3",
+    HidePremiumUpsells: false,
     CloseTabDelay: 2000,
     RequestTimeout: 30000,
   };
