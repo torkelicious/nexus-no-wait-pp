@@ -9,26 +9,27 @@
 // @grant       GM_xmlhttpRequest
 // @grant       GM_info
 // @connect     nexusmods.com
+// @connect     raw.githubusercontent.com
 // ==/UserScript==
 
 // this is the EXPERIMENTAL development branch
-// supposed to be a full refactor of the main script!
-// VERY UNFINISHED!
+// supposed to be a full refactor of the main script
+// UNFINISHED !!!
 
 (function () {
   "use strict";
 
-  // config
-  const CONFIG_KEY = "nexusNoWaitPPConfig";
+  // Config
+  const CONFIG_KEY = "NexusNoWaitPP";
   const DEFAULTS = {
     AutoStartDownload: true,
     AutoCloseTab: true,
     SkipRequirements: true,
-    RefreshOnError: false,
+    ShowAlertsOnError: true,
     PlayErrorSound: true,
     ErrorSoundUrl:
       "https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/errorsound.mp3",
-    HidePremiumUpsells: false,
+    HidePremiumUpsells: false, // !! NOT IMPLEMENTED YET !!
     CloseTabDelay: 2000,
     RequestTimeout: 30000,
   };
@@ -45,84 +46,100 @@
       return DEFAULTS;
     }
   }
-  const cfg = loadConfig();
+  let cfg = loadConfig();
 
-  // logger
-  // TODO: make logging more thorough like in the main branch
-  // also make btn error messages meaningful...!!!
-  const Logger = (function () {
-    function prefix() {
-      return `[NexusNoWait++ v${GM_info.script.version}]`;
-    }
-    function format(level, args) {
+  const Logger = (() => {
+    const prefix = () => `[NexusNoWait++ v${GM_info.script.version}]`;
+    const format = (args) => {
       const items = Array.from(args);
       items.unshift(prefix());
       items.push(`\n at:(${location.href})`);
       return items;
-    }
+    };
+    const log =
+      (level) =>
+      (...args) =>
+        console[level](...format(args));
     return {
-      debug(...args) {
-        console.debug(...format("debug", args));
-      },
-      info(...args) {
-        console.info(...format("info", args));
-      },
-      warn(...args) {
-        console.warn(...format("warn", args));
-      },
-      error(...args) {
-        console.error(...format("error", args));
-      },
+      debug: log("debug"),
+      info: log("info"),
+      warn: log("warn"),
+      error: log("error"),
     };
   })();
 
-  // helpers for NMM nxm building
-  // only bs that seems reliable at the moment...
-  function getCurrentPathSegment(index) {
+  let errorAudioPlayer = null;
+  function setupAudio() {
+    // audio preloading
+    if (!cfg.PlayErrorSound || !cfg.ErrorSoundUrl) return;
+    errorAudioPlayer = new Audio(cfg.ErrorSoundUrl);
+    errorAudioPlayer.preload = "auto";
+    errorAudioPlayer.load();
+  }
+
+  function playErrorSound() {
+    if (errorAudioPlayer) {
+      errorAudioPlayer.currentTime = 0;
+      errorAudioPlayer
+        .play()
+        .catch((e) => Logger.warn("Error playing sound:", e));
+    }
+  }
+
+  // NXM URL helpers
+  function getURLPathSegment(index) {
     return window.location.pathname.split("/")[index] || null;
   }
-  function extractParamsFromText(text, params = {}) {
-    const s = String(text || "");
-    const key = s.match(/(?:md5|key)=([^&"']+)/)?.[1];
-    const exp = s.match(/(?:expires|exp)=([^&"']+)/)?.[1];
-    const user = s.match(/user_id=([^&"']+)/)?.[1];
-    const fid = s.match(/(?:fid|file_id|id)=([^&"']+)/)?.[1];
-    if (key) params.key = key;
-    if (exp) params.expires = exp;
-    if (user) params.user_id = user;
-    if (fid && !params.fileId) params.fileId = fid;
-    params.game = params.game || getCurrentPathSegment(1);
-    params.modId = params.modId || getCurrentPathSegment(3);
+  function parseNXMParamsFromURL(text, params = {}) {
+    const inputText = String(text || "");
+    const mappings = [
+      { regex: /(?:md5|key)=([^&"']+)/, key: "key" },
+      { regex: /(?:expires|exp)=([^&"']+)/, key: "expires" },
+      { regex: /user_id=([^&"']+)/, key: "user_id" },
+      {
+        regex: /(?:file_id)=([^&"']+)/,
+        key: "fileId",
+        condition: () => !params.fileId,
+      },
+    ];
+    for (const { regex, key, condition = () => true } of mappings) {
+      const match = inputText.match(regex)?.[1];
+      if (match && condition()) params[key] = match;
+    }
+    params.game = params.game || getURLPathSegment(1);
+    params.modId = params.modId || getURLPathSegment(3);
     return params;
   }
-  function makeNxMUrl(params = {}) {
+  function buildNXMUrl(params = {}) {
     const needed = ["game", "modId", "fileId", "key", "expires", "user_id"];
     if (needed.some((k) => !params[k])) return null;
     return `nxm://${params.game}/mods/${params.modId}/files/${params.fileId}?key=${params.key}&expires=${params.expires}&user_id=${params.user_id}`;
   }
 
-  function extractUrl(text) {
+  function parseDownloadURLFromResponse(text) {
     if (!text) return null;
-    const s = String(text);
+    const inputText = String(text);
     try {
-      const j = JSON.parse(s);
-      if (j && j.url) {
-        return { url: j.url.replace(/&amp;/g, "&"), source: "json-url" };
+      const json = JSON.parse(inputText);
+      if (json && json.url) {
+        return { url: json.url.replace(/&amp;/g, "&"), source: "json-url" };
       }
     } catch (_) {}
-    const m = s.match(/id=["']dl_link["'][^>]*value=["']([^"']+)["']/i);
-    if (m) {
-      return { url: m[1].replace(/&amp;/g, "&"), source: "dl_link-value" };
+    const match = inputText.match(
+      /id=["']dl_link["'][^>]*value=["']([^"']+)["']/i,
+    );
+    if (match) {
+      return { url: match[1].replace(/&amp;/g, "&"), source: "dl_link-value" };
     }
     return null;
   }
 
   function getGameId() {
-    const s = document.getElementById("section");
-    return s?.dataset?.gameId || "";
+    const sectionElement = document.getElementById("section");
+    return sectionElement?.dataset?.gameId || "";
   }
 
-  // GenerateDownloadUrl (POST)
+  // POST download URL
   function getGenDownloadUrl(fileId, gameId) {
     if (!fileId) return Promise.resolve({ url: null, error: "Missing fileId" });
     const endpoint = "/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl";
@@ -139,15 +156,18 @@
           Referer: location.href,
         },
         timeout: cfg.RequestTimeout,
-        onload(res) {
-          const txt = res.response || res.responseText || "";
-          const extracted = extractUrl(txt);
+        onload(response) {
+          const responseText = response.response || response.responseText || "";
+          const extracted = parseDownloadURLFromResponse(responseText);
           if (extracted) {
             Logger.info("Manual POST: extracted URL via", extracted.source);
             resolve({ url: extracted.url, source: extracted.source });
           } else {
             Logger.warn("Manual POST: no URL extracted");
-            resolve({ url: null, error: "No URL in response" });
+            resolve({
+              url: null,
+              error: "No URL in response\n(Are you logged in?)",
+            });
           }
         },
         onerror() {
@@ -160,19 +180,19 @@
     });
   }
 
-  // NMM: GET DownloadPopUp, extract URL, if https build nxm
+  // NMM download URL extraction
   async function getNMMDownloadUrl(fileId, gameId) {
     if (!fileId) return null;
 
     const popupEndpoint = `/Core/Libs/Common/Widgets/DownloadPopUp?id=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || "")}`;
-    let text = "";
+    let responseText = "";
     await new Promise((resolve) => {
       GM_xmlhttpRequest({
         method: "GET",
         url: popupEndpoint,
         headers: { "X-Requested-With": "XMLHttpRequest" },
-        onload(res) {
-          text = res.response || res.responseText || "";
+        onload(response) {
+          responseText = response.response || response.responseText || "";
           resolve();
         },
         onerror() {
@@ -184,12 +204,12 @@
       });
     });
 
-    if (!text) {
+    if (!responseText) {
       Logger.warn("NMM GET: empty response");
       return null;
     }
 
-    const extracted = extractUrl(text);
+    const extracted = parseDownloadURLFromResponse(responseText);
     if (!extracted) {
       Logger.warn("NMM GET: no URL extracted");
       return null;
@@ -200,12 +220,12 @@
       return extracted.url;
     }
     if (/^https?:\/\//i.test(extracted.url)) {
-      const params = extractParamsFromText(extracted.url, {
+      const params = parseNXMParamsFromURL(extracted.url, {
         fileId,
-        modId: getCurrentPathSegment(3),
-        game: getCurrentPathSegment(1),
+        modId: getURLPathSegment(3),
+        game: getURLPathSegment(1),
       });
-      const nxm = makeNxMUrl(params);
+      const nxm = buildNXMUrl(params);
       if (nxm) {
         Logger.info("NMM GET: built nxm from tokens");
         return nxm;
@@ -218,18 +238,17 @@
     return null;
   }
 
-  // button state
   function setButtonState(button, state, message) {
     try {
-      const span = button.querySelector("span.flex-label");
-      if (span) {
-        span.innerText =
-          state === "waiting"
-            ? "Please Wait..."
-            : state === "downloading"
-              ? "Downloading!"
-              : message || "Error";
-      }
+      const textElement =
+        button.querySelector("span.flex-label, span") || button;
+      const text =
+        state === "waiting"
+          ? "Please Wait..."
+          : state === "downloading"
+            ? "Downloading!"
+            : message || "Error";
+      textElement.innerText = text;
       button.style.color =
         state === "waiting"
           ? "orange"
@@ -239,116 +258,418 @@
     } catch (e) {}
   }
 
-  // click interceptor
+  async function getDownloadResult(isNMM, fileId, gameId) {
+    if (isNMM) {
+      const url = await getNMMDownloadUrl(fileId, gameId);
+      return url ? { url } : { error: "Failed to get URL" };
+    }
+    const result = await getGenDownloadUrl(fileId, gameId);
+    return result.url
+      ? { url: result.url }
+      : { error: result.error || "Unknown error" };
+  }
+
   function attachClickInterceptor() {
+    async function handleDownload(btn, fileId, isNMM, logPrefix = "Download") {
+      setButtonState(btn, "waiting");
+      Logger.debug(`${logPrefix}: fileId`, fileId, "isNMM", isNMM);
+      const { url, error } = await getDownloadResult(
+        isNMM,
+        fileId,
+        getGameId(),
+      );
+      if (error) {
+        setButtonState(btn, "error", error);
+        if (cfg.PlayErrorSound) playErrorSound();
+        if (cfg.ShowAlertsOnError) alert(`Download error: ${error}`);
+        return;
+      }
+      setButtonState(btn, "downloading");
+      location.assign(url);
+    }
+
     document.body.addEventListener(
       "click",
-      async function (e) {
-        const el = e.target.closest("a,button");
-        if (!el) return;
+      async function (event) {
+        const element = event.target.closest("a,button");
+        if (!element) return;
 
-        const href = el.href || el.getAttribute("href") || "";
+        const linkHref = element.href || element.getAttribute("href") || "";
+        if (!linkHref) return;
         let fileId = null;
         try {
-          const u = new URL(href, location.href);
-          fileId = u.searchParams.get("file_id") || u.searchParams.get("id");
+          const url = new URL(linkHref, location.href);
+          fileId =
+            url.searchParams.get("file_id") || url.searchParams.get("id");
         } catch (_) {}
-        if (!fileId && el.dataset) fileId = el.dataset.fileid || el.dataset.id;
-        if (!fileId && !/slow download/i.test(el.textContent || "")) return;
-
-        const isNMM =
-          href.includes("nmm=1") ||
-          href.includes("&nmm") ||
-          el.closest("#action-nmm") !== null;
-        e.preventDefault();
-        e.stopImmediatePropagation();
-
-        if (!fileId) {
-          const p = new URLSearchParams(location.search);
-          fileId = p.get("file_id") || p.get("id");
-        }
         if (!fileId) return;
 
-        setButtonState(el, "waiting");
-        Logger.debug("Intercepted click: fileId", fileId, "isNMM", isNMM);
+        const hasRequirements =
+          linkHref.includes("ModRequirementsPopUp") ||
+          linkHref.includes("tab=requirements");
+        const isNMM =
+          linkHref.includes("nmm=1") ||
+          linkHref.includes("&nmm") ||
+          element.closest("#action-nmm") !== null;
 
-        if (isNMM) {
-          const nmmUrl = await getNMMDownloadUrl(fileId, getGameId());
-          if (!nmmUrl) {
-            setButtonState(el, "error", "Failed to get URL");
-            return;
-          }
-          Logger.info(
-            "NMM click: final URL type",
-            nmmUrl.startsWith("nxm://") ? "nxm" : "https",
+        // If SkipRequirements is enabled and this is a requirements popup button, trigger download directly
+        if (hasRequirements && cfg.SkipRequirements) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          handleDownload(element, fileId, isNMM, "SkipRequirements instant");
+          return;
+        }
+
+        // If requirements are present and skip is not enabled, let the popup/tab open as normal
+        if (hasRequirements && !cfg.SkipRequirements) {
+          return;
+        }
+
+        // Otherwise, handle as normal download
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        handleDownload(element, fileId, isNMM, "Intercepted click");
+      },
+      true,
+    );
+
+    // Intercept "Slow download" button on file_id pages
+    if (location.search.includes("file_id")) {
+      const setupSlowDownloadIntercept = () => {
+        const modFileDownload = document.querySelector("mod-file-download");
+        if (modFileDownload?.shadowRoot) {
+          const slowDownloadBtn = modFileDownload.shadowRoot.querySelector(
+            "#upsell-cards > div.flex.flex-col.justify-between.gap-y-6.rounded-lg.bg-surface-translucent-low.p-6 > button",
           );
-          setButtonState(el, "downloading");
-          location.assign(nmmUrl);
-          if (cfg.AutoCloseTab)
-            setTimeout(() => window.close(), cfg.CloseTabDelay);
-          return;
+          if (slowDownloadBtn) {
+            slowDownloadBtn.addEventListener("click", async (event) => {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              const params = new URLSearchParams(location.search);
+              const fileId = params.get("file_id");
+              if (!fileId) return;
+              const isNMM = params.has("nmm") || params.get("nmm") === "1";
+              Logger.debug(
+                "Slow download intercept: fileId",
+                fileId,
+                "isNMM",
+                isNMM,
+              );
+              setButtonState(slowDownloadBtn, "waiting");
+              const { url } = await getDownloadResult(
+                isNMM,
+                fileId,
+                getGameId(),
+              );
+              if (url) {
+                setButtonState(slowDownloadBtn, "downloading");
+                Logger.info(
+                  `Slow download ${isNMM ? "NMM" : "manual"}: starting download`,
+                );
+                location.assign(url);
+              }
+            });
+          }
         }
+      };
 
-        const result = await getGenDownloadUrl(fileId, getGameId());
-        if (!result.url) {
-          setButtonState(el, "error", result.error || "Unknown error");
-          return;
-        }
-        Logger.info(
-          "Manual click: final URL type",
-          result.url.startsWith("https://") ? "https" : "other",
-        );
-        setButtonState(el, "downloading");
-        location.assign(result.url);
-        if (cfg.AutoCloseTab)
-          setTimeout(() => window.close(), cfg.CloseTabDelay);
+      setupSlowDownloadIntercept();
+      const observer = new MutationObserver(() => {
+        setupSlowDownloadIntercept();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+  }
+
+  async function autoStartDownload() {
+    if (!cfg.AutoStartDownload) return;
+    const params = new URLSearchParams(location.search);
+    const fileId = params.get("file_id");
+    if (!fileId) return;
+    const isNMM = params.has("nmm") || params.get("nmm") === "1";
+    Logger.debug("Auto-start: fileId", fileId, "isNMM", isNMM);
+    await new Promise((r) => setTimeout(r, 200));
+    const { url } = await getDownloadResult(isNMM, fileId, getGameId());
+    if (url) {
+      Logger.info(
+        `Auto ${isNMM ? "NMM" : "manual"}: final URL type`,
+        url.startsWith("nxm://")
+          ? "nxm"
+          : url.startsWith("https://")
+            ? "https"
+            : "other",
+      );
+      location.assign(url);
+      if (cfg.AutoCloseTab) setTimeout(() => window.close(), cfg.CloseTabDelay);
+    }
+  }
+
+  function main() {
+    setupAudio();
+    attachClickInterceptor();
+    interceptRequirementsTab();
+    autoStartDownload();
+    SettingsUI();
+    Logger.debug("NNW++ initiated");
+  }
+
+  function interceptRequirementsTab() {
+    document.body.addEventListener(
+      "click",
+      function (event) {
+        const linkElement = event.target.closest("a[href*='tab=requirements']");
+        if (!linkElement) return;
+        if (!cfg.SkipRequirements) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const linkHref =
+          linkElement.href || linkElement.getAttribute("href") || "";
+        location.replace(linkHref.replace("tab=requirements", "tab=files"));
       },
       true,
     );
   }
 
-  // skip requirements probably obsolete but good to have i guess?
-  function skipRequirements() {
-    if (location.href.includes("tab=requirements")) {
-      Logger.info("Skipped requirements tab");
-      location.replace(location.href.replace("tab=requirements", "tab=files"));
-    }
-  }
+  function SettingsUI() {
+    const SETTING_UI = [
+      {
+        key: "AutoStartDownload",
+        label: "Auto Start Download on file_id= URLs",
+        type: "bool",
+        description:
+          "Automatically start downloads when visiting file download pages (URLs containing file_id=)",
+      },
+      {
+        key: "AutoCloseTab",
+        label: "Auto-Close Tab After Automatic Download ",
+        type: "bool",
+        description:
+          "Automatically close the tab after a download starts on file download pages",
+        showIf: () => cfg.AutoStartDownload,
+      },
+      {
+        key: "SkipRequirements",
+        label: "Skip Requirements PopUp/Tab",
+        type: "bool",
+        description:
+          "Skip the requirements popup/page and proceed directly to download",
+      },
+      {
+        key: "ShowAlertsOnError",
+        label: "Show Error Alert Messages",
+        type: "bool",
+        description: "Display error messages as browser popup alerts",
+      },
+      {
+        key: "PlayErrorSound",
+        label: "Play Error Sound",
+        type: "bool",
+        description: "Play an audio alert when download errors occur",
+      },
 
-  // auto-start on file_id URLs
-  async function autoStartDownload() {
-    if (!cfg.AutoStartDownload) return;
-    const p = new URLSearchParams(location.search);
-    const fid = p.get("file_id") || p.get("id");
-    if (!fid) return;
-    const isNMM = p.has("nmm") || p.get("nmm") === "1";
-    Logger.debug("Auto-start: fileId", fid, "isNMM", isNMM);
-    await new Promise((r) => setTimeout(r, 200));
-    if (isNMM) {
-      const nmmUrl = await getNMMDownloadUrl(fid, getGameId());
-      if (nmmUrl) {
-        Logger.info(
-          "Auto NMM: final URL type",
-          nmmUrl.startsWith("nxm://") ? "nxm" : "https",
-        );
-        location.assign(nmmUrl);
+      /*
+      {
+        // !! NOT IMPLEMENTED YET !!
+        key: "HidePremiumUpsells",
+        label: "Hide Premium Upsells & misc Ads (experimental)",
+        type: "bool",
+        description:
+          "Hide premium upgrade banners, trial offers, and other ad content on the site (experimental)",
+      },*/
+      {
+        key: "RequestTimeout",
+        label: "Request Timeout",
+        type: "number",
+        description:
+          "Maximum time to wait for server responses before timing out (in milliseconds)",
+      },
+      {
+        key: "CloseTabDelay",
+        label: "Auto-Close Tab Delay",
+        type: "number",
+        description:
+          "Delay before automatically closing the tab after download starts (in milliseconds)",
+        showIf: () => cfg.AutoCloseTab,
+      },
+      {
+        key: "ErrorSoundUrl",
+        label: "Error Sound URL",
+        type: "text",
+        description: "URL of the custom sound file to play for error alerts",
+        showIf: () => cfg.PlayErrorSound,
+      },
+    ];
+    const STYLES = {
+      btn: "position:fixed;bottom:20px;right:20px;background:#2f2f2f;color:#fff;padding:10px 15px;border-radius:4px;cursor:pointer;z-index:9999;font-family:'Inter','Helvetica Neue', Helvetica, Arial, sans-serif;font-size:14px;border:none;",
+      modal:
+        "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2f2f2f;color:#dadada;padding:25px;border-radius:4px;z-index:10000;min-width:300px;max-width:90%;max-height:90vh;overflow-y:auto;font-family:'Inter','Helvetica Neue', Helvetica, Arial, sans-serif;",
+      backdrop:
+        "position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.5);z-index:9999;",
+      section:
+        "background:#363636;padding:15px;border-radius:4px;margin-bottom:15px;",
+      sectionHeader:
+        "color:#da8e35;margin:0 0 10px 0;font-size:16px;font-weight:500;",
+      input:
+        "background:#2f2f2f;border:1px solid #444;color:#dadada;border-radius:3px;padding:5px;",
+      row: "margin-bottom:10px;",
+      label: "display:flex;align-items:center;gap:8px;",
+      btnObj: {
+        primary:
+          "padding:8px 15px;border:none;background:#da8e35;color:white;border-radius:3px;cursor:pointer;",
+        secondary:
+          "padding:8px 15px;border:1px solid #da8e35;background:transparent;color:#da8e35;border-radius:3px;cursor:pointer;",
+        advanced:
+          "padding:4px 8px;background:transparent;color:#666;border:none;cursor:pointer;",
+        closeX:
+          "position:absolute;top:10px;right:10px;background:transparent;border:none;color:#fff;font-size:18px;cursor:pointer;line-height:1;padding:5px;",
+      },
+    };
+    function save() {
+      try {
+        GM_setValue(CONFIG_KEY, JSON.stringify(cfg));
+      } catch (e) {}
+    }
+    let activeModal = null;
+    let activeBackdrop = null;
+    function showSettingsModal() {
+      cfg = loadConfig();
+      if (activeModal) activeModal.remove();
+      if (activeBackdrop) activeBackdrop.remove();
+
+      const backdrop = document.createElement("div");
+      backdrop.style.cssText = STYLES.backdrop;
+      backdrop.addEventListener("click", closeModal);
+      document.body.appendChild(backdrop);
+      activeBackdrop = backdrop;
+
+      const modal = document.createElement("div");
+      modal.style.cssText = STYLES.modal;
+
+      const build = (setting) => {
+        const shouldShow = !setting.showIf || setting.showIf();
+        if (setting.type === "bool")
+          return `<div style="${STYLES.row};display:${shouldShow ? "block" : "none"}"><label title="${setting.description}" style="${STYLES.label}"><input type="checkbox" data-setting="${setting.key}" ${cfg[setting.key] ? "checked" : ""}><span>${setting.label}</span></label></div>`;
+        if (setting.type === "number") {
+          const step = setting.key === "CloseTabDelay" ? 100 : 1;
+          return `<div style="${STYLES.row};display:${shouldShow ? "block" : "none"}"><label title="${setting.description}" style="${STYLES.label}"><span>${setting.label}:</span><input type="number" value="${cfg[setting.key]}" min="0" step="${step}" data-setting="${setting.key}" style="${STYLES.input};width:120px;"></label></div>`;
+        }
+        if (setting.type === "text")
+          return `<div style="${STYLES.row};display:${shouldShow ? "block" : "none"}"><label title="${setting.description}" style="${STYLES.label}"><span style="font-size:0.9em;color:#aaa;">${setting.label}:</span><input type="text" value="${cfg[setting.key]}" data-setting="${setting.key}" style="${STYLES.input};width:95%;"></label></div>`;
+        return "";
+      };
+
+      const features = SETTING_UI.filter(
+        (u) =>
+          (u.type === "bool" || u.type === "text") &&
+          u.key !== "RefreshOnError",
+      )
+        .map(build)
+        .join("");
+      const timing = SETTING_UI.filter((u) => u.type === "number")
+        .map(build)
+        .join("");
+
+      modal.innerHTML = `
+        <style>a:hover { text-decoration: underline !important; }</style>
+        <button id="closeSettingsX" style="${STYLES.btnObj.closeX}">×</button>
+        <h3 style="${STYLES.sectionHeader}">NexusNoWait++ Settings</h3>
+        <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Features</h4>${features}</div>
+        <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Timing</h4>${timing}</div>
+        <div style="display:flex;justify-content:center;gap:10px;margin-top:20px;"><button id="resetSettings" style="${STYLES.btnObj.secondary}">Reset</button><button id="closeSettings" style="${STYLES.btnObj.primary}">Save & Close</button></div>
+        <div style="text-align:center;margin-top:12px;color:#666;font-size:12px;">v${GM_info.script.version} by Torkelicious</div>
+        <div style="text-align:center;margin-top:6px;color:#666;font-size:10px;"><a href="https://github.com/torkelicious/nexus-no-wait-pp/" target="_blank" style="color:#666;">This software is open-source and licensed under the GPLv3</a></div>
+      `;
+
+      const update = (element) => {
+        const key = element.getAttribute("data-setting");
+        if (!key) return;
+        let value =
+          element.type === "checkbox"
+            ? element.checked
+            : element.type === "number"
+              ? parseInt(element.value, 10)
+              : element.value;
+        if (typeof value === "number" && isNaN(value)) {
+          element.value = cfg[key];
+          return;
+        }
+        if (cfg[key] !== value) {
+          cfg[key] = value;
+          save();
+        }
+        if (key === "AutoStartDownload") {
+          const row = modal
+            .querySelector('[data-setting="AutoCloseTab"]')
+            ?.closest("div");
+          if (row) row.style.display = element.checked ? "block" : "none";
+        }
+        if (key === "AutoCloseTab") {
+          const row = modal
+            .querySelector('[data-setting="CloseTabDelay"]')
+            ?.closest("div");
+          if (row) row.style.display = element.checked ? "block" : "none";
+        }
+        if (key === "PlayErrorSound") {
+          const row = modal
+            .querySelector('[data-setting="ErrorSoundUrl"]')
+            ?.closest("div");
+          if (row) row.style.display = element.checked ? "block" : "none";
+        }
+      };
+
+      modal.addEventListener("change", (event) => {
+        if (event.target?.hasAttribute("data-setting")) update(event.target);
+      });
+      modal.addEventListener("input", (event) => {
+        if (
+          (event.target.type === "number" || event.target.type === "text") &&
+          event.target?.hasAttribute("data-setting")
+        )
+          update(event.target);
+      });
+
+      const closeX = modal.querySelector("#closeSettingsX");
+      const closeBtn = modal.querySelector("#closeSettings");
+      const resetBtn = modal.querySelector("#resetSettings");
+
+      function closeModal() {
+        if (activeModal) {
+          activeModal.remove();
+          activeModal = null;
+        }
+        if (activeBackdrop) {
+          activeBackdrop.remove();
+          activeBackdrop = null;
+        }
+        document.removeEventListener("keydown", onSettingsKeyDown);
       }
-      if (cfg.AutoCloseTab) setTimeout(() => window.close(), cfg.CloseTabDelay);
-      return;
+      const onSettingsKeyDown = (event) => {
+        if (event.key === "Escape") closeModal();
+      };
+
+      closeX.addEventListener("click", closeModal);
+      closeBtn.addEventListener("click", closeModal);
+      resetBtn.addEventListener("click", () => {
+        Object.assign(cfg, DEFAULTS);
+        save();
+        closeModal();
+      });
+
+      document.body.appendChild(modal);
+      activeModal = modal;
+      document.addEventListener("keydown", onSettingsKeyDown);
     }
-    const result = await getGenDownloadUrl(fid, getGameId());
-    if (result.url) {
-      Logger.info(
-        "Auto manual: final URL type",
-        result.url.startsWith("https://") ? "https" : "other",
-      );
-      location.assign(result.url);
+
+    if (!document.getElementById("nnwpp-btn")) {
+      const btn = document.createElement("div");
+      btn.id = "nnwpp-btn";
+      btn.textContent = "NexusNoWait++ ⚙️";
+      btn.style.cssText = STYLES.btn;
+      btn.onclick = showSettingsModal;
+      btn.onmouseover = () => (btn.style.transform = "translateY(-2px)");
+      document.body.appendChild(btn);
     }
-    if (cfg.AutoCloseTab) setTimeout(() => window.close(), cfg.CloseTabDelay);
   }
 
-  attachClickInterceptor();
-  skipRequirements();
-  autoStartDownload();
-  Logger.debug("NNW++ initiated");
+  main();
 })();
