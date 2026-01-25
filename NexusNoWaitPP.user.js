@@ -141,103 +141,74 @@
     return sectionElement?.dataset?.gameId || "";
   }
 
-  // POST download URL
-  function getGenDownloadUrl(fileId, gameId) {
-    if (!fileId) return Promise.resolve({ url: null, error: "Missing fileId" });
-    const endpoint = "/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl";
-    const body = `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || "")}`;
-    return new Promise((resolve) => {
-      GM_xmlhttpRequest({
-        method: "POST",
-        url: endpoint,
-        data: body,
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-          "X-Requested-With": "XMLHttpRequest",
-          Origin: "https://www.nexusmods.com",
-          Referer: location.href,
-        },
-        timeout: cfg.RequestTimeout,
-        onload(response) {
-          const responseText = response.response || response.responseText || "";
-          const extracted = parseDownloadURLFromResponse(responseText);
-          if (extracted) {
-            Logger.info("Manual POST: extracted URL via", extracted.source);
-            resolve({ url: extracted.url, source: extracted.source });
-          } else {
-            Logger.warn("Manual POST: no URL extracted");
-            resolve({
-              url: null,
-              error: "No URL in response\n(Are you logged in?)",
-            });
-          }
-        },
-        onerror() {
-          resolve({ url: null, error: "Request failed" });
-        },
-        ontimeout() {
-          resolve({ url: null, error: "Timeout" });
-        },
+  // unified download URL function
+  async function getDownloadUrl({ fileId, gameId, isNMM }) {
+    if (!fileId) return { url: null, error: "Missing fileId" };
+
+    if (isNMM) {
+      // NMM logic
+      const popupEndpoint = `/Core/Libs/Common/Widgets/DownloadPopUp?id=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || "")}`;
+      let responseText = "";
+      await new Promise((resolve) => {
+        GM_xmlhttpRequest({
+          method: "GET",
+          url: popupEndpoint,
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+          onload(response) {
+            responseText = response.response || response.responseText || "";
+            resolve();
+          },
+          onerror: resolve,
+          ontimeout: resolve,
+        });
       });
-    });
-  }
-
-  // NMM download URL extraction
-  async function getNMMDownloadUrl(fileId, gameId) {
-    if (!fileId) return null;
-
-    const popupEndpoint = `/Core/Libs/Common/Widgets/DownloadPopUp?id=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || "")}`;
-    let responseText = "";
-    await new Promise((resolve) => {
-      GM_xmlhttpRequest({
-        method: "GET",
-        url: popupEndpoint,
-        headers: { "X-Requested-With": "XMLHttpRequest" },
-        onload(response) {
-          responseText = response.response || response.responseText || "";
-          resolve();
-        },
-        onerror() {
-          resolve();
-        },
-        ontimeout() {
-          resolve();
-        },
-      });
-    });
-
-    if (!responseText) {
-      Logger.warn("NMM GET: empty response");
-      return null;
-    }
-
-    const extracted = parseDownloadURLFromResponse(responseText);
-    if (!extracted) {
-      Logger.warn("NMM GET: no URL extracted");
-      return null;
-    }
-
-    if (/^nxm:\/\//i.test(extracted.url)) {
-      Logger.info("NMM GET: using extracted nxm");
-      return extracted.url;
-    }
-    if (/^https?:\/\//i.test(extracted.url)) {
-      const params = parseNXMParamsFromURL(extracted.url, {
-        fileId,
-        modId: getURLPathSegment(3),
-        game: getURLPathSegment(1),
-      });
-      const nxm = buildNXMUrl(params);
-      if (nxm) {
-        Logger.info("NMM GET: built nxm from tokens");
-        return nxm;
+      if (!responseText) return { url: null, error: "Empty response" };
+      const extracted = parseDownloadURLFromResponse(responseText);
+      if (!extracted) return { url: null, error: "No URL extracted" };
+      if (/^nxm:\/\//i.test(extracted.url)) return { url: extracted.url };
+      if (/^https?:\/\//i.test(extracted.url)) {
+        const params = parseNXMParamsFromURL(extracted.url, {
+          fileId,
+          modId: getURLPathSegment(3),
+          game: getURLPathSegment(1),
+        });
+        const nxm = buildNXMUrl(params);
+        return { url: nxm || extracted.url };
       }
-      Logger.info("NMM GET: using extracted https (no nxm built)");
-      return extracted.url;
+      return { url: null, error: "Unknown URL type" };
+    } else {
+      // Manual logic
+      const endpoint =
+        "/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl";
+      const body = `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || "")}`;
+      return await new Promise((resolve) => {
+        GM_xmlhttpRequest({
+          method: "POST",
+          url: endpoint,
+          data: body,
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest",
+            Origin: "https://www.nexusmods.com",
+            Referer: location.href,
+          },
+          timeout: cfg.RequestTimeout,
+          onload(response) {
+            const responseText =
+              response.response || response.responseText || "";
+            const extracted = parseDownloadURLFromResponse(responseText);
+            if (extracted) resolve({ url: extracted.url });
+            else resolve({ url: null, error: "No URL in response" });
+          },
+          onerror() {
+            resolve({ url: null, error: "Request failed" });
+          },
+          ontimeout() {
+            resolve({ url: null, error: "Timeout" });
+          },
+        });
+      });
     }
-
-    Logger.warn("NMM GET: unknown URL type");
-    return null;
   }
 
   function setButtonState(button, state, message) {
@@ -260,26 +231,15 @@
     } catch (e) {}
   }
 
-  async function getDownloadResult(isNMM, fileId, gameId) {
-    if (isNMM) {
-      const url = await getNMMDownloadUrl(fileId, gameId);
-      return url ? { url } : { error: "Failed to get URL" };
-    }
-    const result = await getGenDownloadUrl(fileId, gameId);
-    return result.url
-      ? { url: result.url }
-      : { error: result.error || "Unknown error" };
-  }
-
   function attachClickInterceptor() {
     async function handleDownload(btn, fileId, isNMM) {
       setButtonState(btn, "waiting");
       Logger.debug("fileId", fileId, "isNMM", isNMM);
-      const { url, error } = await getDownloadResult(
-        isNMM,
+      const { url, error } = await getDownloadUrl({
         fileId,
-        getGameId(),
-      );
+        gameId: getGameId(),
+        isNMM,
+      });
       if (error) {
         setButtonState(btn, "error", error);
         if (cfg.PlayErrorSound) playErrorSound();
@@ -327,7 +287,7 @@
           return;
         }
 
-        // Otherwise, handle as normal download
+        // Otherwise handle as normal download
         event.preventDefault();
         event.stopImmediatePropagation();
         handleDownload(element, fileId, isNMM);
@@ -358,11 +318,11 @@
                 isNMM,
               );
               setButtonState(slowDownloadBtn, "waiting");
-              const { url } = await getDownloadResult(
-                isNMM,
+              const { url } = await getDownloadUrl({
                 fileId,
-                getGameId(),
-              );
+                gameId: getGameId(),
+                isNMM,
+              });
               if (url) {
                 setButtonState(slowDownloadBtn, "downloading");
                 Logger.info(
@@ -408,7 +368,11 @@
     const isNMM = params.has("nmm") || params.get("nmm") === "1";
     Logger.debug("Auto-start: fileId", fileId, "isNMM", isNMM);
     await new Promise((r) => setTimeout(r, 200));
-    const { url } = await getDownloadResult(isNMM, fileId, getGameId());
+    const { url } = await getDownloadUrl({
+      fileId,
+      gameId: getGameId(),
+      isNMM,
+    });
     if (url) {
       Logger.info(
         `Auto ${isNMM ? "NMM" : "manual"}: final URL type`,
