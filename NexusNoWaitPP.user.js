@@ -8,6 +8,7 @@
 // @grant       GM_setValue
 // @grant       GM_xmlhttpRequest
 // @grant       GM_info
+// @grant       GM_addStyle
 // @connect     nexusmods.com
 // @connect     raw.githubusercontent.com
 // ==/UserScript==
@@ -29,7 +30,7 @@
     PlayErrorSound: true,
     ErrorSoundUrl:
       "https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/errorsound.mp3",
-    HidePremiumUpsells: false, // !! NOT IMPLEMENTED YET !!
+    HidePremiumUpsells: false,
     CloseTabDelay: 2000,
     RequestTimeout: 30000,
   };
@@ -381,6 +382,23 @@
     }
   }
 
+  function interceptRequirementsTab() {
+    document.body.addEventListener(
+      "click",
+      function (event) {
+        const linkElement = event.target.closest("a[href*='tab=requirements']");
+        if (!linkElement) return;
+        if (!cfg.SkipRequirements) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const linkHref =
+          linkElement.href || linkElement.getAttribute("href") || "";
+        location.replace(linkHref.replace("tab=requirements", "tab=files"));
+      },
+      true,
+    );
+  }
+
   async function autoStartDownload() {
     if (!cfg.AutoStartDownload) return;
     const params = new URLSearchParams(location.search);
@@ -404,30 +422,68 @@
     }
   }
 
+  function upsellBlocker() {
+    if (!cfg.HidePremiumUpsells) return;
+    const elementsToHideSelectors = [
+      // IDs
+      "#nonPremiumBanner",
+      "#freeTrialBanner",
+      "#ig-banner-container",
+      "#rj-vortex",
+      // broad class matches for dynamic content
+      '[class*="ads-bottom"]',
+      '[class*="ads-top"]',
+      '[class*="to-premium"]',
+      '[class*="from-premium"]',
+      '[class*="premium"]',
+      // specific page elements
+      "#mainContent > div.ads-holder.clearfix.ads-top",
+      "#mainContent > div.ads-holder.clearfix.ads-bottom",
+      "#mainContent > div > div.relative.next-container > div > section.flex.items-center.justify-center > div",
+      "#mainContent > div > div.relative.next-container > div > a",
+      "#headlessui-menu-items-_r_ap_ > div.flex.flex-col.gap-y-4.px-3.py-2 > div.hidden.md\\:block",
+      "#head > div.rj-right-tray.rj-profile-tray.rj-open > ul > li.user-profile-menu-section-top > a",
+      "#mainContent > div.flex.items-center.justify-center.gap-x-4.border-y.border-stroke-subdued.bg-surface-low.py-2",
+      "#mainContent > div.hidden.items-center.justify-center.gap-x-4.border-b.border-stroke-subdued.bg-surface-low.py-2.md\\:flex",
+      "#mainContent > div.relative > div.relative.next-container.pb-20 > div.space-y-16 > div.relative.overflow-hidden.rounded-lg.border-2.border-\[\#FCD23F\]",
+      "#mainContent > div.relative > div.relative.next-container.pb-20 > div.mb-6.w-full.space-y-6.border-b.border-stroke-weak.pt-4.pb-6.sm\\:mb-0.sm\\:border-none.sm\\:pb-8 > section > div.flex.flex-col.gap-2.rounded-sm.bg-surface-translucent-low.p-2.5.backdrop-blur-xs.xs\\:w-fit.xs\\:max-w-sm.order-4.h-fit.w-full",
+      "#filters-panel > div.mt-4.hidden.rounded-lg.border.border-creator-subdued.bg-creator-weak.bg-cover.p-4",
+    ];
+    // hide all selectors
+    GM_addStyle(
+      elementsToHideSelectors
+        .map((selector) => `${selector}{display:none!important}`)
+        .join("\n"),
+    );
+
+    // hide upsells in shadow root
+    const modFileDownloadElement = document.querySelector("mod-file-download");
+    if (modFileDownloadElement?.shadowRoot) {
+      const shadowStyle = document.createElement("style");
+      shadowStyle.textContent =
+        "#upsell-cards > div.relative.flex.flex-col.justify-between.gap-y-6.rounded-lg.border.bg-gradient-to-t.from-premium-weak.from-25\\%.to-premium-900.to-75\\%.p-6.sm\\:order-last.border-premium-100.border-premium-moderate{display:none!important}";
+      modFileDownloadElement.shadowRoot.appendChild(shadowStyle);
+    }
+    // Hide premium banner inside freetrialbanner shadow root
+    const freeTrialBannerElement = document.querySelector("free-trial-banner");
+    if (freeTrialBannerElement?.shadowRoot) {
+      const premiumBanner = freeTrialBannerElement.shadowRoot.querySelector(
+        "div.relative.flex.justify-between.gap-3.bg-premium-weak.px-3.py-2.5",
+      );
+      if (premiumBanner) premiumBanner.style.display = "none";
+    }
+  }
+
+  function archivedFileHandler() {}
+
   function main() {
     setupAudio();
     attachClickInterceptor();
     interceptRequirementsTab();
     autoStartDownload();
+    upsellBlocker();
     SettingsUI();
     Logger.debug("NNW++ initiated");
-  }
-
-  function interceptRequirementsTab() {
-    document.body.addEventListener(
-      "click",
-      function (event) {
-        const linkElement = event.target.closest("a[href*='tab=requirements']");
-        if (!linkElement) return;
-        if (!cfg.SkipRequirements) return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        const linkHref =
-          linkElement.href || linkElement.getAttribute("href") || "";
-        location.replace(linkHref.replace("tab=requirements", "tab=files"));
-      },
-      true,
-    );
   }
 
   function SettingsUI() {
@@ -467,15 +523,13 @@
         description: "Play an audio alert when download errors occur",
       },
 
-      /*
       {
-        // !! NOT IMPLEMENTED YET !!
         key: "HidePremiumUpsells",
-        label: "Hide Premium Upsells & misc Ads (experimental)",
+        label: "Hide Premium Upsells & misc Annoyances (experimental)",
         type: "bool",
         description:
-          "Hide premium upgrade banners, trial offers, and other ad content on the site (experimental)",
-      },*/
+          "Hide premium upgrade banners, trial offers, and other Annoyances on the site (experimental)\n slow and buggy, you are probably better off using an adblocker.",
+      },
       {
         key: "RequestTimeout",
         label: "Request Timeout",
