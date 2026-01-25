@@ -164,7 +164,8 @@
       });
       if (!responseText) return { url: null, error: "Empty response" };
       const extracted = parseDownloadURLFromResponse(responseText);
-      if (!extracted) return { url: null, error: "No URL extracted" };
+      if (!extracted)
+        return { url: null, error: "No URL extracted\n(Are you logged in?)" };
       if (/^nxm:\/\//i.test(extracted.url)) return { url: extracted.url };
       if (/^https?:\/\//i.test(extracted.url)) {
         const params = parseNXMParamsFromURL(extracted.url, {
@@ -198,7 +199,11 @@
               response.response || response.responseText || "";
             const extracted = parseDownloadURLFromResponse(responseText);
             if (extracted) resolve({ url: extracted.url });
-            else resolve({ url: null, error: "No URL in response" });
+            else
+              resolve({
+                url: null,
+                error: "No URL in response\n(Are you logged in?)",
+              });
           },
           onerror() {
             resolve({ url: null, error: "Request failed" });
