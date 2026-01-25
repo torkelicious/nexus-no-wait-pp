@@ -1,7 +1,12 @@
 // ==UserScript==
-// @name        Nexus No Wait ++ [devel]
-// @description NNW++ development branch
-// @version     latest
+// @name        Nexus No Wait ++
+// @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
+// @version     2.x-devel
+// @namespace   NexusNoWaitPlusPlus
+// @author      Torkelicious
+// @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
+// @icon        https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
+// @license     GPL-3.0-or-later
 // @include     https://*.nexusmods.com/*
 // @run-at      document-idle
 // @grant       GM_getValue
@@ -9,13 +14,11 @@
 // @grant       GM_xmlhttpRequest
 // @grant       GM_info
 // @grant       GM_addStyle
-// @connect     nexusmods.com
+// @grant       GM_listValues
+// @grant       GM_deleteValue
+// @connect     *.nexusmods.com
 // @connect     raw.githubusercontent.com
 // ==/UserScript==
-
-// this is the EXPERIMENTAL development branch
-// supposed to be a full refactor of the main script
-// UNFINISHED !!!
 
 (function () {
   "use strict";
@@ -48,6 +51,28 @@
       return DEFAULTS;
     }
   }
+
+  // this exists because previous versions have a different config system
+  async function cleanResetConfig() {
+    // remove all GM storage keys stored
+    if (
+      typeof GM_listValues === "function" &&
+      typeof GM_deleteValue === "function"
+    ) {
+      const keys = await GM_listValues();
+      for (const key of keys) {
+        await GM_deleteValue(key);
+      }
+    }
+    // Reset cfg to default
+    Object.assign(cfg, DEFAULTS);
+    // save defaults back to storage
+    if (typeof GM_setValue === "function") {
+      await GM_setValue(CONFIG_KEY, JSON.stringify(cfg));
+    }
+    location.reload();
+  }
+
   let cfg = loadConfig();
 
   const Logger = (() => {
@@ -718,9 +743,8 @@
 
       closeX.addEventListener("click", closeModal);
       closeBtn.addEventListener("click", closeModal);
-      resetBtn.addEventListener("click", () => {
-        Object.assign(cfg, DEFAULTS);
-        save();
+      resetBtn.addEventListener("click", async () => {
+        await cleanResetConfig();
         closeModal();
       });
 
