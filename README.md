@@ -19,8 +19,6 @@ A userscript for Nexus Mods that skips countdowns, bypasses redirects, auto-down
 
 - **Skip download countdowns**  
   Instantly start downloads without waiting.
-- **Bypass download option selection**  
-  Optionally Goes straight to downloading, skipping the manual/mod manager choice page.
 - **Supports all games and mod managers**  
   Works with Manual, Vortex, MO2, NMM, nxm links.
 - **Auto-start downloads for `file_id=` URLs**  
