@@ -270,9 +270,9 @@
   }
 
   function attachClickInterceptor() {
-    async function handleDownload(btn, fileId, isNMM, logPrefix = "Download") {
+    async function handleDownload(btn, fileId, isNMM) {
       setButtonState(btn, "waiting");
-      Logger.debug(`${logPrefix}: fileId`, fileId, "isNMM", isNMM);
+      Logger.debug("fileId", fileId, "isNMM", isNMM);
       const { url, error } = await getDownloadResult(
         isNMM,
         fileId,
@@ -316,7 +316,7 @@
         if (hasRequirements && cfg.SkipRequirements) {
           event.preventDefault();
           event.stopImmediatePropagation();
-          handleDownload(element, fileId, isNMM, "SkipRequirements instant");
+          handleDownload(element, fileId, isNMM);
           return;
         }
 
@@ -328,7 +328,7 @@
         // Otherwise, handle as normal download
         event.preventDefault();
         event.stopImmediatePropagation();
-        handleDownload(element, fileId, isNMM, "Intercepted click");
+        handleDownload(element, fileId, isNMM);
       },
       true,
     );
@@ -456,7 +456,7 @@
       },
       {
         key: "ShowAlertsOnError",
-        label: "Show Error Alert Messages",
+        label: "Show Alert Messages on Errors",
         type: "bool",
         description: "Display error messages as browser popup alerts",
       },
