@@ -761,6 +761,13 @@
       btn.onclick = showSettingsModal;
       btn.onmouseover = () => (btn.style.transform = "translateY(-2px)");
       document.body.appendChild(btn);
+      // keep button persistent if removed by react hydration -.-
+      const observer = new MutationObserver(() => {
+        if (!document.getElementById("nnwpp-btn")) {
+          document.body.appendChild(btn);
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
     }
   }
 
