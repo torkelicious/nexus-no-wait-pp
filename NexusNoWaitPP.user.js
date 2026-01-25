@@ -434,13 +434,11 @@
         "#upsell-cards > div.relative.flex.flex-col.justify-between.gap-y-6.rounded-lg.border.bg-gradient-to-t.from-premium-weak.from-25\\%.to-premium-900.to-75\\%.p-6.sm\\:order-last.border-premium-100.border-premium-moderate{display:none!important}";
       modFileDownloadElement.shadowRoot.appendChild(shadowStyle);
     }
-    // hide premium banner inside freetrialbanner shadow root
-    const freeTrialBannerElement = document.querySelector("free-trial-banner");
-    if (freeTrialBannerElement?.shadowRoot) {
-      const premiumBanner = freeTrialBannerElement.shadowRoot.querySelector(
-        "div.relative.flex.justify-between.gap-3.bg-premium-weak.px-3.py-2.5",
-      );
-      if (premiumBanner) premiumBanner.style.display = "none";
+    // hide premium upsell banner 
+    const premiumBanner = document.querySelector('.bg-nexus-premium-gradient');
+    if (premiumBanner) {
+      premiumBanner.remove();
+      Logger.info('Removed premium upsell banner');
     }
   }
 
