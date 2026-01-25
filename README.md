@@ -48,8 +48,6 @@ No bans have been reported, but use caution and avoid excessive automated downlo
 
 ---
 
-## Credits
-
 - Originally Based on [StrangeT's Nexus No Wait](https://greasyfork.org/en/scripts/394039-nexus-no-wait)
 
 ---
