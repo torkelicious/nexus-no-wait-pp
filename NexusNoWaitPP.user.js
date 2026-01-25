@@ -30,6 +30,7 @@
     PlayErrorSound: true,
     ErrorSoundUrl:
       "https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/errorsound.mp3",
+    HandleArchivedFiles: true,
     HidePremiumUpsells: false,
     CloseTabDelay: 2000,
     RequestTimeout: 30000,
@@ -464,7 +465,7 @@
         "#upsell-cards > div.relative.flex.flex-col.justify-between.gap-y-6.rounded-lg.border.bg-gradient-to-t.from-premium-weak.from-25\\%.to-premium-900.to-75\\%.p-6.sm\\:order-last.border-premium-100.border-premium-moderate{display:none!important}";
       modFileDownloadElement.shadowRoot.appendChild(shadowStyle);
     }
-    // Hide premium banner inside freetrialbanner shadow root
+    // hide premium banner inside freetrialbanner shadow root
     const freeTrialBannerElement = document.querySelector("free-trial-banner");
     if (freeTrialBannerElement?.shadowRoot) {
       const premiumBanner = freeTrialBannerElement.shadowRoot.querySelector(
@@ -474,7 +475,47 @@
     }
   }
 
-  function archivedFileHandler() {}
+  function archivedFileHandler() {
+    if (!cfg.HandleArchivedFiles) return;
+
+    const url = location.href;
+
+    // add file archive button on files tab if it dosent exist
+    if (url.includes("tab=files") && !url.includes("category=archived")) {
+      const footer = document.getElementById("files-tab-footer");
+      if (footer && !footer.querySelector("[data-archived-btn]")) {
+        footer.insertAdjacentHTML(
+          "beforeend",
+          `<a class="btn inline-flex" data-archived-btn href="${url}&category=archived">
+            <span class="flex-label">File archive</span>
+          </a>`,
+        );
+      }
+    }
+
+    // only proceed if on archived category page
+    if (!url.includes("category=archived")) return;
+
+    const headers = document.getElementsByClassName("file-expander-header");
+    const downloads = document.getElementsByClassName("accordion-downloads");
+    const base = location.origin + location.pathname;
+
+    Array.from(headers).forEach((header, i) => {
+      const fileId = header?.dataset?.id;
+      const box = downloads[i];
+      if (!fileId || !box || box.dataset.done) return;
+
+      box.dataset.done = "1";
+      box.innerHTML = `
+        <a class="btn inline-flex" href="${base}?tab=files&file_id=${fileId}&nmm=1">
+          <span class="flex-label">Mod manager download</span>
+        </a>
+        <a class="btn inline-flex" href="${base}?tab=files&file_id=${fileId}">
+          <span class="flex-label">Manual download</span>
+        </a>
+      `;
+    });
+  }
 
   function main() {
     setupAudio();
@@ -482,6 +523,7 @@
     interceptRequirementsTab();
     autoStartDownload();
     upsellBlocker();
+    archivedFileHandler();
     SettingsUI();
     Logger.debug("NNW++ initiated");
   }
@@ -520,7 +562,7 @@
         key: "PlayErrorSound",
         label: "Play Error Sound",
         type: "bool",
-        description: "Play an audio alert when download errors occur",
+        description: "Play an error sound when download errors occur",
       },
 
       {
@@ -551,6 +593,12 @@
         type: "text",
         description: "URL of the custom sound file to play for error alerts",
         showIf: () => cfg.PlayErrorSound,
+      },
+      {
+        key: "HandleArchivedFiles",
+        label: "Generate download buttons for Archived Files",
+        type: "bool",
+        description: "Enable handling of archived files.",
       },
     ];
     const STYLES = {
@@ -629,7 +677,7 @@
         <h3 style="${STYLES.sectionHeader}">NexusNoWait++ Settings</h3>
         <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Features</h4>${features}</div>
         <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Timing</h4>${timing}</div>
-        <div style="display:flex;justify-content:center;gap:10px;margin-top:20px;"><button id="resetSettings" style="${STYLES.btnObj.secondary}">Reset</button><button id="closeSettings" style="${STYLES.btnObj.primary}">Save & Close</button></div>
+        <div style="display:flex;justify-content:center;gap:10px;margin-top:20px;"><button id="resetSettings" style="${STYLES.btnObj.secondary}">Reset Settings</button><button id="closeSettings" style="${STYLES.btnObj.primary}">Save & Close</button></div>
         <div style="text-align:center;margin-top:12px;color:#666;font-size:12px;">v${GM_info.script.version} by Torkelicious</div>
         <div style="text-align:center;margin-top:6px;color:#666;font-size:10px;"><a href="https://github.com/torkelicious/nexus-no-wait-pp/" target="_blank" style="color:#666;">This software is open-source and licensed under the GPLv3</a></div>
       `;
