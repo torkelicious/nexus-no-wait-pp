@@ -467,46 +467,51 @@
     }
   }
 
+  function waitForElement(selector, cb) {
+    const el = document.querySelector(selector);
+    if (el) return cb(el);
+    const mo = new MutationObserver(() => {
+      const el = document.querySelector(selector);
+      if (el) {
+        mo.disconnect();
+        cb(el);
+      }
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  }
+
   function archivedFileHandler() {
     if (!cfg.HandleArchivedFiles) return;
-
     const url = location.href;
-
-    // add file archive button on files tab if it dosent exist
     if (url.includes("tab=files") && !url.includes("category=archived")) {
-      const footer = document.getElementById("files-tab-footer");
-      if (footer && !footer.querySelector("[data-archived-btn]")) {
-        footer.insertAdjacentHTML(
-          "beforeend",
-          `<a class="btn inline-flex" data-archived-btn href="${url}&category=archived">
-            <span class="flex-label">File archive</span>
-          </a>`,
-        );
-      }
+      waitForElement("#files-tab-footer", (footer) => {
+        footer.querySelector("p")?.style.setProperty("display", "none");
+        // Check for any existing 'File archive' button
+        const hasArchiveBtn = Array.from(
+          footer.querySelectorAll("a.btn.inline-flex .flex-label"),
+        ).some((el) => el.textContent.trim() === "File archive");
+        if (!hasArchiveBtn) {
+          footer.insertAdjacentHTML(
+            "beforeend",
+            `<a class="btn inline-flex" data-archived-btn="true" href="${url}&category=archived" style="background:#da8e35;color:#fff;margin-left:8px;"><span class="flex-label">File archive</span></a>`,
+          );
+        }
+      });
     }
-
-    // only proceed if on archived category page
     if (!url.includes("category=archived")) return;
-
     const headers = document.getElementsByClassName("file-expander-header");
     const downloads = document.getElementsByClassName("accordion-downloads");
     const base = location.origin + location.pathname;
-
-    Array.from(headers).forEach((header, i) => {
-      const fileId = header?.dataset?.id;
+    for (let i = 0; i < headers.length; i++) {
+      const fileId = headers[i]?.dataset?.id;
       const box = downloads[i];
-      if (!fileId || !box || box.dataset.done) return;
-
+      if (!fileId || !box || box.dataset.done) continue;
       box.dataset.done = "1";
       box.innerHTML = `
-        <a class="btn inline-flex" href="${base}?tab=files&file_id=${fileId}&nmm=1">
-          <span class="flex-label">Mod manager download</span>
-        </a>
-        <a class="btn inline-flex" href="${base}?tab=files&file_id=${fileId}">
-          <span class="flex-label">Manual download</span>
-        </a>
-      `;
-    });
+      <a class="btn inline-flex" href="${base}?tab=files&file_id=${fileId}&nmm=1"><span class="flex-label">Mod manager download</span></a>
+      <a class="btn inline-flex" href="${base}?tab=files&file_id=${fileId}"><span class="flex-label">Manual download</span></a>
+    `;
+    }
   }
 
   function main() {
@@ -771,5 +776,13 @@
     }
   }
 
-  main();
+  main(); // first run
+  // spa navigation support to re-run main() on URL change
+  let lastUrl = location.href;
+  new MutationObserver(() => {
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      main();
+    }
+  }).observe(document.body, { subtree: true, childList: true });
 })();
