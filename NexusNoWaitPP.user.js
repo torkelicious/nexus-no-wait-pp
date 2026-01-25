@@ -77,16 +77,11 @@
 
   const Logger = (() => {
     const prefix = () => `[NexusNoWait++ v${GM_info.script.version}]`;
-    const format = (args) => {
-      const items = Array.from(args);
-      items.unshift(prefix());
-      items.push(`\n at:(${location.href})`);
-      return items;
-    };
+    const format = (...args) => [prefix(), ...args, `\n at:(${location.href})`];
     const log =
       (level) =>
       (...args) =>
-        console[level](...format(args));
+        console[level](...format(...args));
     return {
       debug: log("debug"),
       info: log("info"),
@@ -133,8 +128,8 @@
       const match = inputText.match(regex)?.[1];
       if (match && condition()) params[key] = match;
     }
-    params.game = params.game || getURLPathSegment(1);
-    params.modId = params.modId || getURLPathSegment(3);
+    params.game ||= getURLPathSegment(1);
+    params.modId ||= getURLPathSegment(3);
     return params;
   }
   function buildNXMUrl(params = {}) {
@@ -245,19 +240,14 @@
     try {
       const textElement =
         button.querySelector("span.flex-label, span") || button;
-      const text =
-        state === "waiting"
-          ? "Please Wait..."
-          : state === "downloading"
-            ? "Downloading!"
-            : message || "Error";
-      textElement.innerText = text;
-      button.style.color =
-        state === "waiting"
-          ? "orange"
-          : state === "downloading"
-            ? "green"
-            : "red";
+      const stateConfig = {
+        waiting: { text: "Please Wait...", color: "orange" },
+        downloading: { text: "Downloading!", color: "green" },
+        error: { text: message || "Error", color: "red" },
+      };
+      const config = stateConfig[state] || stateConfig.error;
+      textElement.innerText = config.text;
+      button.style.color = config.color;
     } catch (e) {}
   }
 
@@ -280,6 +270,14 @@
       location.assign(url);
     }
 
+    const extractFileId = (href) => {
+      try {
+        const url = new URL(href, location.href);
+        return url.searchParams.get("file_id") || url.searchParams.get("id");
+      } catch {}
+      return null;
+    };
+
     document.body.addEventListener(
       "click",
       async function (event) {
@@ -288,12 +286,7 @@
 
         const linkHref = element.href || element.getAttribute("href") || "";
         if (!linkHref) return;
-        let fileId = null;
-        try {
-          const url = new URL(linkHref, location.href);
-          fileId =
-            url.searchParams.get("file_id") || url.searchParams.get("id");
-        } catch (_) {}
+        const fileId = extractFileId(linkHref);
         if (!fileId) return;
 
         const hasRequirements =
@@ -469,11 +462,10 @@
 
   function waitForElement(selector, cb) {
     const el = document.querySelector(selector);
-    if (el) return cb(el);
+    if (el) cb(el);
     const mo = new MutationObserver(() => {
       const el = document.querySelector(selector);
       if (el) {
-        mo.disconnect();
         cb(el);
       }
     });
@@ -499,11 +491,15 @@
       });
     }
     if (!url.includes("category=archived")) return;
-    const headers = document.getElementsByClassName("file-expander-header");
-    const downloads = document.getElementsByClassName("accordion-downloads");
+    const headers = Array.from(
+      document.getElementsByClassName("file-expander-header"),
+    );
+    const downloads = Array.from(
+      document.getElementsByClassName("accordion-downloads"),
+    );
     const base = location.origin + location.pathname;
-    for (let i = 0; i < headers.length; i++) {
-      const fileId = headers[i]?.dataset?.id;
+    for (const [i, header] of headers.entries()) {
+      const fileId = header?.dataset?.id;
       const box = downloads[i];
       if (!fileId || !box || box.dataset.done) continue;
       box.dataset.done = "1";
@@ -779,6 +775,29 @@
   main(); // first run
   // spa navigation support to re-run main() on URL change
   let lastUrl = location.href;
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+  history.pushState = function (...args) {
+    originalPushState.apply(this, args);
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      main();
+    }
+  };
+  history.replaceState = function (...args) {
+    originalReplaceState.apply(this, args);
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      main();
+    }
+  };
+  window.addEventListener("popstate", () => {
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      main();
+    }
+  });
+  // fallback for other changes
   new MutationObserver(() => {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
