@@ -1,42 +1,53 @@
-# nexus-no-wait-pp
-GitHub host for Nexus No Wait++
+Github host for Nexus No Wait ++
 
-https://greasyfork.org/en/scripts/519037-nexus-no-wait
+[GreasyFork page](https://greasyfork.org/en/scripts/519037-nexus-no-wait)
 
-Install via: [GreasyFork](https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.user.js)
-***or*** [GitHub](https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/NexusNoWaitPP.user.js)
-using your scriptmanager of choice
-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+Install using your preferred userscript manager (such as Violentmonkey or Tampermonkey).
 
-# Nexus No Wait ++ 
-
-Download from Nexusmods.com without wait (Manual/Vortex/MO2/NMM), Tweaked with extra features.
-
-I have rewritten & modified StrangeT's Nexus No Wait script with a few extra features, this includes automatically closing a tab once download has started, and notifing the user via a Javascript alert if the download has failed. (or other errors)
-
-With this script you can automatically download any files from nexusmods.com without wait.
-This support Manual/Vortex/MO2/NMM downloads.
-
-***Features:***
-- Skip countdown
-- Bypass redirect to the download option selection page
-- Support all games and mod managers (via nxm links)
-- Auto-start downloads for file_id= URLs (works great with modlists etc which often open these links expecting you to click each button manually)
-- Automatically close tabs after file_id= URL download starts
-- Generate download buttons for archived files
-- Notify user via alerts & audio if there is an error with the download 
-- Auto-skip requirements popup/tab and go directly to download 
-- UI for configuration + (⚙️ button in bottom right corner)
+- [Direct install (GreasyFork)](https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.user.js)
+- [Direct install (GitHub)](https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/NexusNoWaitPP.user.js)
 
 ---
 
-Originally based off of: https://greasyfork.org/en/scripts/394039-nexus-no-wait
+# Nexus No Wait ++
 
-⚠ **I do belive this script may break Nexus Mods TOS. Use at your own risk.**
-
-<sup>though i've seen anyone been banned, (and i've only been rate limited due to testing the script) please exercise caution!<sup>
+A userscript for Nexus Mods that skips countdowns, bypasses redirects, auto-downloads files, and other extra features
 
 ---
-GitHub: https://github.com/torkelicious/nexus-no-wait-pp/tree/main
+
+## Features
+
+- **Skip download countdowns**  
+  Instantly start downloads without waiting.
+- **Supports all games and mod managers**  
+  Works with Manual, Vortex, MO2, NMM, nxm links.
+- **Auto-start downloads for `file_id=` URLs**  
+  Optionally Automatically triggers downloads for direct file links (great for modlists etc).
+- **Auto-close tab after download starts**  
+  Optionally closes the tab a few seconds after the download begins.
+- **Download buttons for archived files**  
+  Adds working download buttons to archived file listings.
+- **Error notifications**  
+  Optionally Alerts you with a popup and/or sound if a download fails.
+- **Skip requirements popups/tabs**  
+  Optionally bypasses mod requirements dialogs and tabs.
+- **Hide premium upsells and annoyances**  
+  Optionally hides premium banners and other annoyances (experimental).
+- **UI for configuration**  
+  Click the ⚙️ button in the bottom-right corner to open the settings.
 
 ---
+
+⚠ **This script may violate Nexus Mods' Terms of Service. Use at your own risk.**
+
+<sup>
+No bans have been reported, but use caution and avoid excessive automated downloads to avoid getting rate-limited.
+<sup>
+
+---
+
+Originally Based on [StrangeT's Nexus No Wait](https://greasyfork.org/en/scripts/394039-nexus-no-wait)
+
+---
+
+[GitHub repository](https://github.com/torkelicious/nexus-no-wait-pp/tree/main)
