@@ -2,16 +2,16 @@ Github host for Nexus No Wait ++
 
 [GreasyFork page](https://greasyfork.org/en/scripts/519037-nexus-no-wait)
 
+Install using your preferred userscript manager (such as Violentmonkey or Tampermonkey).
+
+- [Direct install (GreasyFork)](https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.user.js)
+- [Direct install (GitHub)](https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/NexusNoWaitPP.user.js)
+
 ---
 
 # Nexus No Wait ++
 
 A userscript for Nexus Mods that skips countdowns, bypasses redirects, auto-downloads files, and other extra features
-
-- [Direct install (GreasyFork)](https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.user.js)
-- [Direct install (GitHub)](https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/NexusNoWaitPP.user.js)
-
-Install using your preferred userscript manager (such as Violentmonkey or Tampermonkey).
 
 ---
 
