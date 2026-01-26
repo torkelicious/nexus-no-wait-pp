@@ -109,16 +109,16 @@
   function parseNXMParamsFromURL(text, params = {}) {
     const inputText = String(text || '')
     const mappings = [
-      {regex: /(?:md5|key)=([^&"']+)/, key: 'key'},
-      {regex: /(?:expires|exp)=([^&"']+)/, key: 'expires'},
-      {regex: /user_id=([^&"']+)/, key: 'user_id'},
+      { regex: /(?:md5|key)=([^&"']+)/, key: 'key' },
+      { regex: /(?:expires|exp)=([^&"']+)/, key: 'expires' },
+      { regex: /user_id=([^&"']+)/, key: 'user_id' },
       {
         regex: /(?:file_id)=([^&"']+)/,
         key: 'fileId',
         condition: () => !params.fileId
       }
     ]
-    for (const {regex, key, condition = () => true} of mappings) {
+    for (const { regex, key, condition = () => true } of mappings) {
       const match = inputText.match(regex)?.[1]
       if (match && condition()) params[key] = match
     }
@@ -160,8 +160,8 @@
   }
 
   // unified download URL function
-  async function getDownloadUrl({fileId, gameId, isNMM}) {
-    if (!fileId) return {url: null, error: 'Missing fileId'}
+  async function getDownloadUrl({ fileId, gameId, isNMM }) {
+    if (!fileId) return { url: null, error: 'Missing fileId' }
 
     if (isNMM) {
       // NMM logic
@@ -171,7 +171,7 @@
         GM.xmlHttpRequest({
           method: 'GET',
           url: popupEndpoint,
-          headers: {'X-Requested-With': 'XMLHttpRequest'},
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
           onload(response) {
             responseText = response.response || response.responseText || ''
             resolve()
@@ -180,14 +180,14 @@
           ontimeout: resolve
         })
       })
-      if (!responseText) return {url: null, error: 'Empty response'}
+      if (!responseText) return { url: null, error: 'Empty response' }
       const extracted = parseDownloadURLFromResponse(responseText)
       if (!extracted)
         return {
           url: null,
           error: 'No URL extracted\n(Are you logged in?)'
         }
-      if (/^nxm:\/\//i.test(extracted.url)) return {url: extracted.url}
+      if (/^nxm:\/\//i.test(extracted.url)) return { url: extracted.url }
       if (/^https?:\/\//i.test(extracted.url)) {
         const params = parseNXMParamsFromURL(extracted.url, {
           fileId,
@@ -195,9 +195,9 @@
           game: getURLPathSegment(1)
         })
         const nxm = buildNXMUrl(params)
-        return {url: nxm || extracted.url}
+        return { url: nxm || extracted.url }
       }
-      return {url: null, error: 'Unknown URL type'}
+      return { url: null, error: 'Unknown URL type' }
     } else {
       // Manual logic
       const endpoint = '/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl'
@@ -217,7 +217,7 @@
           onload(response) {
             const responseText = response.response || response.responseText || ''
             const extracted = parseDownloadURLFromResponse(responseText)
-            if (extracted) resolve({url: extracted.url})
+            if (extracted) resolve({ url: extracted.url })
             else
               resolve({
                 url: null,
@@ -225,10 +225,10 @@
               })
           },
           onerror() {
-            resolve({url: null, error: 'Request failed'})
+            resolve({ url: null, error: 'Request failed' })
           },
           ontimeout() {
-            resolve({url: null, error: 'Timeout'})
+            resolve({ url: null, error: 'Timeout' })
           }
         })
       })
@@ -239,9 +239,9 @@
     try {
       const textElement = button.querySelector('span.flex-label, span') || button
       const stateConfig = {
-        waiting: {text: 'Please Wait...', color: 'orange'},
-        downloading: {text: 'Downloading!', color: 'green'},
-        error: {text: message || 'Error', color: 'red'}
+        waiting: { text: 'Please Wait...', color: 'orange' },
+        downloading: { text: 'Downloading!', color: 'green' },
+        error: { text: message || 'Error', color: 'red' }
       }
       const config = stateConfig[state] || stateConfig.error
       textElement.innerText = config.text
@@ -253,7 +253,7 @@
     async function handleDownload(btn, fileId, isNMM) {
       setButtonState(btn, 'waiting')
       Logger.debug('fileId', fileId, 'isNMM', isNMM)
-      const {url, error} = await getDownloadUrl({
+      const { url, error } = await getDownloadUrl({
         fileId,
         gameId: getGameId(),
         isNMM
@@ -329,7 +329,7 @@
               const isNMM = params.has('nmm') || params.get('nmm') === '1'
               Logger.debug('Slow download intercept: fileId', fileId, 'isNMM', isNMM)
               setButtonState(slowDownloadBtn, 'waiting')
-              const {url} = await getDownloadUrl({
+              const { url } = await getDownloadUrl({
                 fileId,
                 gameId: getGameId(),
                 isNMM
@@ -348,7 +348,7 @@
       const observer = new MutationObserver(() => {
         setupSlowDownloadIntercept()
       })
-      observer.observe(document.body, {childList: true, subtree: true})
+      observer.observe(document.body, { childList: true, subtree: true })
     }
   }
 
@@ -376,7 +376,7 @@
     const isNMM = params.has('nmm') || params.get('nmm') === '1'
     Logger.debug('Auto-start: fileId', fileId, 'isNMM', isNMM)
     await new Promise(r => setTimeout(r, 200))
-    const {url} = await getDownloadUrl({
+    const { url } = await getDownloadUrl({
       fileId,
       gameId: getGameId(),
       isNMM
@@ -446,7 +446,7 @@
         cb(el)
       }
     })
-    mo.observe(document.body, {childList: true, subtree: true})
+    mo.observe(document.body, { childList: true, subtree: true })
   }
 
   function archivedFileHandler() {
@@ -720,7 +720,7 @@
           document.body.appendChild(btn)
         }
       })
-      observer.observe(document.body, {childList: true, subtree: true})
+      observer.observe(document.body, { childList: true, subtree: true })
     }
   }
 
@@ -755,5 +755,5 @@
       lastUrl = location.href
       main()
     }
-  }).observe(document.body, {subtree: true, childList: true})
+  }).observe(document.body, { subtree: true, childList: true })
 })()
