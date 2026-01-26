@@ -156,7 +156,7 @@
         if (keyMatch) return { url: keyMatch[1] }
       }
     }
-    // Manual logic (unchanged)
+    // Manual logic
     const endpoint = '/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl'
     const body = `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || '')}`
     return await new Promise(resolve => {
