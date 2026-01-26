@@ -103,35 +103,6 @@
   }
 
   // NXM URL helpers
-  function getURLPathSegment(index) {
-    return window.location.pathname.split('/')[index] || null
-  }
-  function parseNXMParamsFromURL(text, params = {}) {
-    const inputText = String(text || '')
-    const mappings = [
-      { regex: /(?:md5|key)=([^&"']+)/, key: 'key' },
-      { regex: /(?:expires|exp)=([^&"']+)/, key: 'expires' },
-      { regex: /user_id=([^&"']+)/, key: 'user_id' },
-      {
-        regex: /(?:file_id)=([^&"']+)/,
-        key: 'fileId',
-        condition: () => !params.fileId
-      }
-    ]
-    for (const { regex, key, condition = () => true } of mappings) {
-      const match = inputText.match(regex)?.[1]
-      if (match && condition()) params[key] = match
-    }
-    params.game ||= getURLPathSegment(1)
-    params.modId ||= getURLPathSegment(3)
-    return params
-  }
-  function buildNXMUrl(params = {}) {
-    const needed = ['game', 'modId', 'fileId', 'key', 'expires', 'user_id']
-    if (needed.some(k => !params[k])) return null
-    return `nxm://${params.game}/mods/${params.modId}/files/${params.fileId}?key=${params.key}&expires=${params.expires}&user_id=${params.user_id}`
-  }
-
   function parseDownloadURLFromResponse(text) {
     if (!text) return null
     const inputText = String(text)
@@ -160,17 +131,15 @@
   }
 
   // unified download URL function
-  async function getDownloadUrl({ fileId, gameId, isNMM }) {
+  async function getDownloadUrl({ fileId, gameId, isNMM, href }) {
     if (!fileId) return { url: null, error: 'Missing fileId' }
-
-    if (isNMM) {
-      // NMM logic
-      const popupEndpoint = `/Core/Libs/Common/Widgets/DownloadPopUp?id=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || '')}`
+    if (isNMM && href) {
+      // direct GET
       let responseText = ''
       await new Promise(resolve => {
         GM.xmlHttpRequest({
           method: 'GET',
-          url: popupEndpoint,
+          url: href,
           headers: { 'X-Requested-With': 'XMLHttpRequest' },
           onload(response) {
             responseText = response.response || response.responseText || ''
@@ -180,59 +149,46 @@
           ontimeout: resolve
         })
       })
-      if (!responseText) return { url: null, error: 'Empty response' }
-      const extracted = parseDownloadURLFromResponse(responseText)
-      if (!extracted)
-        return {
-          url: null,
-          error: 'No URL extracted\n(Are you logged in?)'
-        }
-      if (/^nxm:\/\//i.test(extracted.url)) return { url: extracted.url }
-      if (/^https?:\/\//i.test(extracted.url)) {
-        const params = parseNXMParamsFromURL(extracted.url, {
-          fileId,
-          modId: getURLPathSegment(3),
-          game: getURLPathSegment(1)
-        })
-        const nxm = buildNXMUrl(params)
-        return { url: nxm || extracted.url }
+      if (responseText) {
+        const nxmMatch = responseText.match(/(nxm:\/\/[\w\W]+?)(["'\s<>]|$)/i)
+        if (nxmMatch) return { url: nxmMatch[1] }
+        const keyMatch = responseText.match(/['"]([^'"]*?key[^'"]*?)['"]/)
+        if (keyMatch) return { url: keyMatch[1] }
       }
-      return { url: null, error: 'Unknown URL type' }
-    } else {
-      // Manual logic
-      const endpoint = '/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl'
-      const body = `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || '')}`
-      return await new Promise(resolve => {
-        GM.xmlHttpRequest({
-          method: 'POST',
-          url: endpoint,
-          data: body,
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'X-Requested-With': 'XMLHttpRequest',
-            Origin: 'https://www.nexusmods.com',
-            Referer: location.href
-          },
-          timeout: cfg.RequestTimeout,
-          onload(response) {
-            const responseText = response.response || response.responseText || ''
-            const extracted = parseDownloadURLFromResponse(responseText)
-            if (extracted) resolve({ url: extracted.url })
-            else
-              resolve({
-                url: null,
-                error: 'No URL in response\n(Are you logged in?)'
-              })
-          },
-          onerror() {
-            resolve({ url: null, error: 'Request failed' })
-          },
-          ontimeout() {
-            resolve({ url: null, error: 'Timeout' })
-          }
-        })
-      })
     }
+    // Manual logic (unchanged)
+    const endpoint = '/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl'
+    const body = `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || '')}`
+    return await new Promise(resolve => {
+      GM.xmlHttpRequest({
+        method: 'POST',
+        url: endpoint,
+        data: body,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-Requested-With': 'XMLHttpRequest',
+          Origin: 'https://www.nexusmods.com',
+          Referer: location.href
+        },
+        timeout: cfg.RequestTimeout,
+        onload(response) {
+          const responseText = response.response || response.responseText || ''
+          const extracted = parseDownloadURLFromResponse(responseText)
+          if (extracted) resolve({ url: extracted.url })
+          else
+            resolve({
+              url: null,
+              error: 'No URL in response\n(Are you logged in?)'
+            })
+        },
+        onerror() {
+          resolve({ url: null, error: 'Request failed' })
+        },
+        ontimeout() {
+          resolve({ url: null, error: 'Timeout' })
+        }
+      })
+    })
   }
 
   function setButtonState(button, state, message) {
@@ -250,13 +206,14 @@
   }
 
   function attachClickInterceptor() {
-    async function handleDownload(btn, fileId, isNMM) {
+    async function handleDownload(btn, fileId, isNMM, href) {
       setButtonState(btn, 'waiting')
       Logger.debug('fileId', fileId, 'isNMM', isNMM)
       const { url, error } = await getDownloadUrl({
         fileId,
         gameId: getGameId(),
-        isNMM
+        isNMM,
+        href
       })
       if (error) {
         setButtonState(btn, 'error', error)
@@ -294,7 +251,7 @@
         if (hasRequirements && cfg.SkipRequirements) {
           event.preventDefault()
           event.stopImmediatePropagation()
-          handleDownload(element, fileId, isNMM)
+          handleDownload(element, fileId, isNMM, linkHref)
           return
         }
 
@@ -306,7 +263,7 @@
         // Otherwise handle as normal download
         event.preventDefault()
         event.stopImmediatePropagation()
-        handleDownload(element, fileId, isNMM)
+        handleDownload(element, fileId, isNMM, linkHref)
       },
       true
     )
@@ -332,7 +289,8 @@
               const { url } = await getDownloadUrl({
                 fileId,
                 gameId: getGameId(),
-                isNMM
+                isNMM,
+                href: location.href
               })
               if (url) {
                 setButtonState(slowDownloadBtn, 'downloading')
@@ -379,7 +337,8 @@
     const { url } = await getDownloadUrl({
       fileId,
       gameId: getGameId(),
-      isNMM
+      isNMM,
+      href: location.href
     })
     if (url) {
       Logger.info(
