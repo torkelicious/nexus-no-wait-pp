@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.0.2
+// @version     2.0.3
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -102,7 +102,6 @@
     }
   }
 
-  // NXM URL helpers
   function parseDownloadURLFromResponse(text) {
     if (!text) return null
     const inputText = String(text)
@@ -125,12 +124,6 @@
     return null
   }
 
-  function getGameId() {
-    const sectionElement = document.getElementById('section')
-    return sectionElement?.dataset?.gameId || ''
-  }
-
-  // unified download URL function
   async function getDownloadUrl({ fileId, gameId, isNMM, href }) {
     if (!fileId) return { url: null, error: 'Missing fileId' }
     if (isNMM && href) {
@@ -152,9 +145,50 @@
       if (responseText) {
         const nxmMatch = responseText.match(/(nxm:\/\/[\w\W]+?)(["'\s<>]|$)/i)
         if (nxmMatch) return { url: nxmMatch[1] }
-        const keyMatch = responseText.match(/['"]([^'"]*?key[^'"]*?)['"]/)
+        const keyMatch = responseText.match(/['"]([^'"']*?key[^'"']*?)['"]/)
         if (keyMatch) return { url: keyMatch[1] }
       }
+      // href is a requirements popup try popup endpoint
+      if (/ModRequirementsPopUp/.test(href)) {
+        const popupEndpoint = `/Core/Libs/Common/Widgets/DownloadPopUp?id=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || '')}`
+        let popupText = ''
+        await new Promise(resolve => {
+          GM.xmlHttpRequest({
+            method: 'GET',
+            url: popupEndpoint,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            onload(response) {
+              popupText = response.response || response.responseText || ''
+              resolve()
+            },
+            onerror: resolve,
+            ontimeout: resolve
+          })
+        })
+        if (popupText) {
+          const dlLinkMatch = popupText.match(/id=["']dl_link["'][^>]*value=["']([^"']+)["']/i)
+          if (dlLinkMatch) {
+            const dlUrl = dlLinkMatch[1].replace(/&amp;/g, '&')
+            try {
+              const urlObj = new URL(dlUrl)
+              const key = urlObj.searchParams.get('md5') || urlObj.searchParams.get('key')
+              const expires = urlObj.searchParams.get('expires')
+              const user_id = urlObj.searchParams.get('user_id')
+              const game = window.location.pathname.split('/')[1] || null
+              const modId = window.location.pathname.split('/')[3] || null
+              if (key && expires && user_id && game && modId && fileId) {
+                const nxm = `nxm://${game}/mods/${modId}/files/${fileId}?key=${key}&expires=${expires}&user_id=${user_id}`
+                return { url: nxm }
+              }
+            } catch (e) {}
+          }
+          const nxmMatch = popupText.match(/(nxm:\/\/[\w\W]+?)(["'\s<>]|$)/i)
+          if (nxmMatch) return { url: nxmMatch[1] }
+          const keyMatch = popupText.match(/['"]([^'"']*?key[^'"']*?)['"]/)
+          if (keyMatch) return { url: keyMatch[1] }
+        }
+      }
+      return { url: null, error: 'No NMM download link found' }
     }
     // Manual logic
     const endpoint = '/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl'
@@ -211,7 +245,7 @@
       Logger.debug('fileId', fileId, 'isNMM', isNMM)
       const { url, error } = await getDownloadUrl({
         fileId,
-        gameId: getGameId(),
+        gameId: document.getElementById('section')?.dataset?.gameId || '',
         isNMM,
         href
       })
@@ -247,20 +281,15 @@
         const hasRequirements = linkHref.includes('ModRequirementsPopUp') || linkHref.includes('tab=requirements')
         const isNMM = linkHref.includes('nmm=1') || linkHref.includes('&nmm') || element.closest('#action-nmm') !== null
 
-        // If SkipRequirements is enabled and this is a requirements popup button, trigger download directly
         if (hasRequirements && cfg.SkipRequirements) {
           event.preventDefault()
           event.stopImmediatePropagation()
           handleDownload(element, fileId, isNMM, linkHref)
           return
         }
-
-        // If requirements are present and skip is not enabled, let the popup/tab open as normal
         if (hasRequirements && !cfg.SkipRequirements) {
           return
         }
-
-        // Otherwise handle as normal download
         event.preventDefault()
         event.stopImmediatePropagation()
         handleDownload(element, fileId, isNMM, linkHref)
@@ -268,7 +297,6 @@
       true
     )
 
-    // Intercept "Slow download" button on file_id pages
     if (location.search.includes('file_id')) {
       const setupSlowDownloadIntercept = () => {
         const modFileDownload = document.querySelector('mod-file-download')
@@ -288,7 +316,7 @@
               setButtonState(slowDownloadBtn, 'waiting')
               const { url } = await getDownloadUrl({
                 fileId,
-                gameId: getGameId(),
+                gameId: document.getElementById('section')?.dataset?.gameId || '',
                 isNMM,
                 href: location.href
               })
@@ -336,7 +364,7 @@
     await new Promise(r => setTimeout(r, 200))
     const { url } = await getDownloadUrl({
       fileId,
-      gameId: getGameId(),
+      gameId: document.getElementById('section')?.dataset?.gameId || '',
       isNMM,
       href: location.href
     })
