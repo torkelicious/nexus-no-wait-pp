@@ -126,70 +126,58 @@
 
   async function getDownloadUrl({ fileId, gameId, isNMM, href }) {
     if (!fileId) return { url: null, error: 'Missing fileId' }
-    if (isNMM && href) {
-      // direct GET
-      let responseText = ''
-      await new Promise(resolve => {
+
+    const fetchText = url =>
+      new Promise(resolve => {
         GM.xmlHttpRequest({
           method: 'GET',
-          url: href,
+          url,
           headers: { 'X-Requested-With': 'XMLHttpRequest' },
           onload(response) {
-            responseText = response.response || response.responseText || ''
-            resolve()
+            resolve(response.response || response.responseText || '')
           },
-          onerror: resolve,
-          ontimeout: resolve
+          onerror(error) {
+            Logger.warn('Fetch error for', url, error)
+            resolve('')
+          },
+          ontimeout() {
+            Logger.warn('Fetch timeout for', url)
+            resolve('')
+          }
         })
       })
-      if (responseText) {
-        const nxmMatch = responseText.match(/(nxm:\/\/[\w\W]+?)(["'\s<>]|$)/i)
-        if (nxmMatch) return { url: nxmMatch[1] }
-        const keyMatch = responseText.match(/['"]([^'"']*?key[^'"']*?)['"]/)
-        if (keyMatch) return { url: keyMatch[1] }
-      }
-      // href is a requirements popup try popup endpoint
+
+    const parseDownloadLink = text => {
+      if (!text) return null
+      const nxmMatch = text.match(/(nxm:\/\/[\w\W]+?)(["'\s<>]|$)/i)
+      if (nxmMatch) return nxmMatch[1]
+      const keyMatch = text.match(/['"]([^'"']*?key[^'"']*?)['"]/)
+      if (keyMatch) return keyMatch[1]
+      return null
+    }
+
+    if (isNMM && href) {
+      const firstResponse = await fetchText(href)
+      Logger.info('First NMM fetch URL:', href)
+      Logger.info('First NMM response:', firstResponse)
+
+      const link = parseDownloadLink(firstResponse)
+      if (link) return { url: link }
+
       if (/ModRequirementsPopUp/.test(href)) {
-        const popupEndpoint = `/Core/Libs/Common/Widgets/DownloadPopUp?id=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || '')}`
-        let popupText = ''
-        await new Promise(resolve => {
-          GM.xmlHttpRequest({
-            method: 'GET',
-            url: popupEndpoint,
-            headers: { 'X-Requested-With': 'XMLHttpRequest' },
-            onload(response) {
-              popupText = response.response || response.responseText || ''
-              resolve()
-            },
-            onerror: resolve,
-            ontimeout: resolve
-          })
-        })
-        if (popupText) {
-          const dlLinkMatch = popupText.match(/id=["']dl_link["'][^>]*value=["']([^"']+)["']/i)
-          if (dlLinkMatch) {
-            const dlUrl = dlLinkMatch[1].replace(/&amp;/g, '&')
-            try {
-              const urlObj = new URL(dlUrl)
-              const key = urlObj.searchParams.get('md5') || urlObj.searchParams.get('key')
-              const expires = urlObj.searchParams.get('expires')
-              const user_id = urlObj.searchParams.get('user_id')
-              const game = window.location.pathname.split('/')[1] || null
-              const modId = window.location.pathname.split('/')[3] || null
-              if (key && expires && user_id && game && modId && fileId) {
-                const nxm = `nxm://${game}/mods/${modId}/files/${fileId}?key=${key}&expires=${expires}&user_id=${user_id}`
-                return { url: nxm }
-              }
-            } catch (e) {}
-          }
-          const nxmMatch = popupText.match(/(nxm:\/\/[\w\W]+?)(["'\s<>]|$)/i)
-          if (nxmMatch) return { url: nxmMatch[1] }
-          const keyMatch = popupText.match(/['"]([^'"']*?key[^'"']*?)['"]/)
-          if (keyMatch) return { url: keyMatch[1] }
+        const downloadHrefMatch = firstResponse.match(/href=["']([^"']*?file_id[^"']*?)["']/i)
+        if (downloadHrefMatch) {
+          const downloadUrl = downloadHrefMatch[1]
+          Logger.info('Parsed download URL from popup:', downloadUrl)
+          const downloadPageResponse = await fetchText(downloadUrl)
+          Logger.info('Download page response:', downloadPageResponse)
+          const link2 = parseDownloadLink(downloadPageResponse)
+          if (link2) return { url: link2 }
         }
       }
       return { url: null, error: 'No NMM download link found' }
     }
+
     // Manual logic
     const endpoint = '/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl'
     const body = `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || '')}`
