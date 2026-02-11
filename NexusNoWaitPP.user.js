@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.0.4
+// @version     2.0.5
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -128,24 +128,32 @@
     if (!fileId) return { url: null, error: 'Missing fileId' }
 
     const fetchText = url =>
-      new Promise(resolve => {
-        GM.xmlHttpRequest({
-          method: 'GET',
-          url,
-          headers: { 'X-Requested-With': 'XMLHttpRequest' },
-          onload(response) {
-            resolve(response.response || response.responseText || '')
-          },
-          onerror(error) {
-            Logger.warn('Fetch error for', url, error)
-            resolve('')
-          },
-          ontimeout() {
-            Logger.warn('Fetch timeout for', url)
-            resolve('')
-          }
-        })
+      fetch(url, {
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
       })
+        .then(r => r.text())
+        .catch(err => {
+          Logger.warn('Native fetch failed for', url, err, '— falling back to GM.xmlHttpRequest')
+          return new Promise(resolve => {
+            GM.xmlHttpRequest({
+              method: 'GET',
+              url,
+              headers: { 'X-Requested-With': 'XMLHttpRequest' },
+              onload(response) {
+                resolve(response.response || response.responseText || '')
+              },
+              onerror(error) {
+                Logger.warn('GM fetch error for', url, error)
+                resolve('')
+              },
+              ontimeout() {
+                Logger.warn('GM fetch timeout for', url)
+                resolve('')
+              }
+            })
+          })
+        })
 
     const parseDownloadLink = text => {
       if (!text) return null
@@ -181,36 +189,54 @@
     // Manual logic
     const endpoint = '/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl'
     const body = `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || '')}`
-    return await new Promise(resolve => {
-      GM.xmlHttpRequest({
+    try {
+      const response = await fetch(endpoint, {
         method: 'POST',
-        url: endpoint,
-        data: body,
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'X-Requested-With': 'XMLHttpRequest',
-          Origin: 'https://www.nexusmods.com',
-          Referer: location.href
+          'X-Requested-With': 'XMLHttpRequest'
         },
-        timeout: cfg.RequestTimeout,
-        onload(response) {
-          const responseText = response.response || response.responseText || ''
-          const extracted = parseDownloadURLFromResponse(responseText)
-          if (extracted) resolve({ url: extracted.url })
-          else
-            resolve({
-              url: null,
-              error: 'No URL in response\n(Are you logged in?)'
-            })
-        },
-        onerror() {
-          resolve({ url: null, error: 'Request failed' })
-        },
-        ontimeout() {
-          resolve({ url: null, error: 'Timeout' })
-        }
+        body,
+        signal: AbortSignal.timeout(cfg.RequestTimeout)
       })
-    })
+      const responseText = await response.text()
+      const extracted = parseDownloadURLFromResponse(responseText)
+      if (extracted) return { url: extracted.url }
+      return { url: null, error: 'No URL in response\n(Are you logged in?)' }
+    } catch (fetchErr) {
+      Logger.warn('Native fetch POST failed, falling back to GM.xmlHttpRequest:', fetchErr)
+      return await new Promise(resolve => {
+        GM.xmlHttpRequest({
+          method: 'POST',
+          url: endpoint,
+          data: body,
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'X-Requested-With': 'XMLHttpRequest',
+            Origin: 'https://www.nexusmods.com',
+            Referer: location.href
+          },
+          timeout: cfg.RequestTimeout,
+          onload(response) {
+            const responseText = response.response || response.responseText || ''
+            const extracted = parseDownloadURLFromResponse(responseText)
+            if (extracted) resolve({ url: extracted.url })
+            else
+              resolve({
+                url: null,
+                error: 'No URL in response\n(Are you logged in?)'
+              })
+          },
+          onerror() {
+            resolve({ url: null, error: 'Request failed' })
+          },
+          ontimeout() {
+            resolve({ url: null, error: 'Timeout' })
+          }
+        })
+      })
+    }
   }
 
   function setButtonState(button, state, message) {
@@ -302,12 +328,18 @@
               const isNMM = params.has('nmm') || params.get('nmm') === '1'
               Logger.debug('Slow download intercept: fileId', fileId, 'isNMM', isNMM)
               setButtonState(slowDownloadBtn, 'waiting')
-              const { url } = await getDownloadUrl({
+              const { url, error } = await getDownloadUrl({
                 fileId,
                 gameId: document.getElementById('section')?.dataset?.gameId || '',
                 isNMM,
                 href: location.href
               })
+              if (error) {
+                setButtonState(slowDownloadBtn, 'error', error)
+                if (cfg.PlayErrorSound) playErrorSound()
+                if (cfg.ShowAlertsOnError) alert(`Download error: ${error}`)
+                return
+              }
               if (url) {
                 setButtonState(slowDownloadBtn, 'downloading')
                 Logger.info(`Slow download ${isNMM ? 'NMM' : 'manual'}: starting download`)
@@ -350,12 +382,18 @@
     const isNMM = params.has('nmm') || params.get('nmm') === '1'
     Logger.debug('Auto-start: fileId', fileId, 'isNMM', isNMM)
     await new Promise(r => setTimeout(r, 200))
-    const { url } = await getDownloadUrl({
+    const { url, error } = await getDownloadUrl({
       fileId,
       gameId: document.getElementById('section')?.dataset?.gameId || '',
       isNMM,
       href: location.href
     })
+    if (error) {
+      Logger.error('Auto-start download error:', error)
+      if (cfg.PlayErrorSound) playErrorSound()
+      if (cfg.ShowAlertsOnError) alert(`Download error: ${error}`)
+      return
+    }
     if (url) {
       Logger.info(
         `Auto ${isNMM ? 'NMM' : 'manual'}: final URL type`,
