@@ -1,17 +1,18 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.0.5
+// @version     2.1.0
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
 // @icon        https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
 // @license     GPL-3.0-or-later
-// @include     https://*.nexusmods.com/*
+// @match       https://*.nexusmods.com/*
 // @run-at      document-idle
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       GM.xmlHttpRequest
+// @grant       GM_xmlhttpRequest
 // @grant       GM_info
 // @grant       GM_addStyle
 // @grant       GM_listValues
@@ -27,7 +28,7 @@
   const CONFIG_KEY = 'NexusNoWaitPP'
   const DEFAULTS = {
     AutoStartDownload: true,
-    AutoCloseTab: true,
+    AutoCloseTab: true, // only applies on pages where the userscript has proper perms... -.-
     SkipRequirements: true,
     ShowAlertsOnError: true,
     PlayErrorSound: true,
@@ -37,15 +38,11 @@
     CloseTabDelay: 2000,
     RequestTimeout: 30000
   }
+
   function loadConfig() {
     try {
       const raw = typeof GM_getValue === 'function' ? GM_getValue(CONFIG_KEY, null) : null
-      return raw
-        ? {
-            ...DEFAULTS,
-            ...(typeof raw === 'string' ? JSON.parse(raw) : raw)
-          }
-        : DEFAULTS
+      return raw ? { ...DEFAULTS, ...(typeof raw === 'string' ? JSON.parse(raw) : raw) } : DEFAULTS
     } catch (e) {
       return DEFAULTS
     }
@@ -53,42 +50,51 @@
 
   // this exists because previous versions have a different config system
   async function cleanResetConfig() {
-    // remove all GM storage keys stored
     if (typeof GM_listValues === 'function' && typeof GM_deleteValue === 'function') {
-      const keys = await GM_listValues()
-      for (const key of keys) {
-        await GM_deleteValue(key)
-      }
+      for (const key of await GM_listValues()) await GM_deleteValue(key)
     }
-    // Reset cfg to default
     Object.assign(cfg, DEFAULTS)
-    // save defaults back to storage
-    if (typeof GM_setValue === 'function') {
-      await GM_setValue(CONFIG_KEY, JSON.stringify(cfg))
-    }
+    if (typeof GM_setValue === 'function') await GM_setValue(CONFIG_KEY, JSON.stringify(cfg))
     location.reload()
   }
 
   let cfg = loadConfig()
+  let listenersAttached = false
 
   const Logger = (() => {
-    const prefix = () => `[NexusNoWait++ v${GM_info.script.version}]`
-    const format = (...args) => [prefix(), ...args, `\n at:(${location.href})`]
-    const log =
-      level =>
-      (...args) =>
-        console[level](...format(...args))
-    return {
-      debug: log('debug'),
-      info: log('info'),
-      warn: log('warn'),
-      error: log('error')
-    }
+    const tag = () => `[NexusNoWait++ v${GM_info.script.version}]`
+    return ['debug', 'info', 'warn', 'error'].reduce((o, lvl) => {
+      o[lvl] = (...a) => console[lvl](tag(), ...a)
+      return o
+    }, {})
   })()
+
+  // prefer GM.xmlHttpRequest but keep GM_xmlhttpRequest fallback for compatibility !!!
+  // (the script tries fetch though mostly now as it seems faster... // ? not sure how good it works though...)
+  const gmXmlHttpRequest = typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest.bind(GM) : typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : null
+
+  if (!gmXmlHttpRequest) {
+    Logger.error('No GM XHR API available script may not function correctly.')
+  }
+
+  function gmRequest(url, opts = {}) {
+    return new Promise(resolve => {
+      gmXmlHttpRequest({
+        method: 'GET',
+        ...opts,
+        url,
+        timeout: opts.timeout ?? cfg.RequestTimeout,
+        onload: r => resolve(r.response || r.responseText || ''),
+        onerror: () => resolve(''),
+        ontimeout: () => resolve('')
+      })
+    })
+  }
+
+  const getGameId = () => document.getElementById('section')?.dataset?.gameId || ''
 
   let errorAudioPlayer = null
   function setupAudio() {
-    // audio preloading
     if (!cfg.PlayErrorSound || !cfg.ErrorSoundUrl) return
     errorAudioPlayer = new Audio(cfg.ErrorSoundUrl)
     errorAudioPlayer.preload = 'auto'
@@ -107,53 +113,28 @@
     const inputText = String(text)
     try {
       const json = JSON.parse(inputText)
-      if (json && json.url) {
-        return {
-          url: json.url.replace(/&amp;/g, '&'),
-          source: 'json-url'
-        }
-      }
+      if (json?.url) return { url: json.url.replace(/&amp;/g, '&'), source: 'json-url' }
     } catch (_) {}
     const match = inputText.match(/id=["']dl_link["'][^>]*value=["']([^"']+)["']/i)
-    if (match) {
-      return {
-        url: match[1].replace(/&amp;/g, '&'),
-        source: 'dl_link-value'
-      }
-    }
+    if (match) return { url: match[1].replace(/&amp;/g, '&'), source: 'dl_link-value' }
     return null
   }
 
   async function getDownloadUrl({ fileId, gameId, isNMM, href }) {
     if (!fileId) return { url: null, error: 'Missing fileId' }
 
-    const fetchText = url =>
-      fetch(url, {
-        credentials: 'same-origin',
-        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-      })
-        .then(r => r.text())
-        .catch(err => {
-          Logger.warn('Native fetch failed for', url, err, '— falling back to GM.xmlHttpRequest')
-          return new Promise(resolve => {
-            GM.xmlHttpRequest({
-              method: 'GET',
-              url,
-              headers: { 'X-Requested-With': 'XMLHttpRequest' },
-              onload(response) {
-                resolve(response.response || response.responseText || '')
-              },
-              onerror(error) {
-                Logger.warn('GM fetch error for', url, error)
-                resolve('')
-              },
-              ontimeout() {
-                Logger.warn('GM fetch timeout for', url)
-                resolve('')
-              }
-            })
-          })
+    const fetchText = async url => {
+      try {
+        const r = await fetch(url, {
+          credentials: 'same-origin',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' }
         })
+        return await r.text()
+      } catch (err) {
+        Logger.warn('Native fetch failed for', url, err, ' falling back to GM XHR')
+        return gmRequest(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      }
+    }
 
     const parseDownloadLink = text => {
       if (!text) return null
@@ -189,14 +170,16 @@
     // Manual logic
     const endpoint = '/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl'
     const body = `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || '')}`
+    const headers = {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest'
+    }
+
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
         credentials: 'same-origin',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'X-Requested-With': 'XMLHttpRequest'
-        },
+        headers,
         body,
         signal: AbortSignal.timeout(cfg.RequestTimeout)
       })
@@ -205,68 +188,44 @@
       if (extracted) return { url: extracted.url }
       return { url: null, error: 'No URL in response\n(Are you logged in?)' }
     } catch (fetchErr) {
-      Logger.warn('Native fetch POST failed, falling back to GM.xmlHttpRequest:', fetchErr)
-      return await new Promise(resolve => {
-        GM.xmlHttpRequest({
-          method: 'POST',
-          url: endpoint,
-          data: body,
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'X-Requested-With': 'XMLHttpRequest',
-            Origin: 'https://www.nexusmods.com',
-            Referer: location.href
-          },
-          timeout: cfg.RequestTimeout,
-          onload(response) {
-            const responseText = response.response || response.responseText || ''
-            const extracted = parseDownloadURLFromResponse(responseText)
-            if (extracted) resolve({ url: extracted.url })
-            else
-              resolve({
-                url: null,
-                error: 'No URL in response\n(Are you logged in?)'
-              })
-          },
-          onerror() {
-            resolve({ url: null, error: 'Request failed' })
-          },
-          ontimeout() {
-            resolve({ url: null, error: 'Timeout' })
-          }
-        })
+      Logger.warn('Native fetch POST failed, falling back to GM XHR:', fetchErr)
+      const responseText = await gmRequest(endpoint, {
+        method: 'POST',
+        data: body,
+        headers: { ...headers, Origin: 'https://www.nexusmods.com', Referer: location.href }
       })
+      const extracted = parseDownloadURLFromResponse(responseText)
+      if (extracted) return { url: extracted.url }
+      return { url: null, error: 'No URL in response\n(Are you logged in?)' }
     }
   }
 
   function setButtonState(button, state, message) {
-    try {
-      const textElement = button.querySelector('span.flex-label, span') || button
-      const stateConfig = {
-        waiting: { text: 'Please Wait...', color: 'orange' },
-        downloading: { text: 'Downloading!', color: 'green' },
-        error: { text: message || 'Error', color: 'red' }
-      }
-      const config = stateConfig[state] || stateConfig.error
-      textElement.innerText = config.text
-      button.style.color = config.color
-    } catch (e) {}
+    const textElement = button.querySelector('span.flex-label, span') || button
+    const stateConfig = {
+      waiting: { text: 'Please Wait...', color: 'orange' },
+      downloading: { text: 'Downloading!', color: 'green' },
+      error: { text: message || 'Error', color: 'red' }
+    }
+    const config = stateConfig[state] || stateConfig.error
+    textElement.innerText = config.text
+    button.style.color = config.color
+  }
+
+  function handleError(btn, error) {
+    if (btn) setButtonState(btn, 'error', error)
+    Logger.error(error)
+    if (cfg.PlayErrorSound) playErrorSound()
+    if (cfg.ShowAlertsOnError) alert(`Download error: ${error}`)
   }
 
   function attachClickInterceptor() {
     async function handleDownload(btn, fileId, isNMM, href) {
       setButtonState(btn, 'waiting')
       Logger.debug('fileId', fileId, 'isNMM', isNMM)
-      const { url, error } = await getDownloadUrl({
-        fileId,
-        gameId: document.getElementById('section')?.dataset?.gameId || '',
-        isNMM,
-        href
-      })
+      const { url, error } = await getDownloadUrl({ fileId, gameId: getGameId(), isNMM, href })
       if (error) {
-        setButtonState(btn, 'error', error)
-        if (cfg.PlayErrorSound) playErrorSound()
-        if (cfg.ShowAlertsOnError) alert(`Download error: ${error}`)
+        handleError(btn, error)
         return
       }
       setButtonState(btn, 'downloading')
@@ -294,16 +253,7 @@
 
         const hasRequirements = linkHref.includes('ModRequirementsPopUp') || linkHref.includes('tab=requirements')
         const isNMM = linkHref.includes('nmm=1') || linkHref.includes('&nmm') || element.closest('#action-nmm') !== null
-
-        if (hasRequirements && cfg.SkipRequirements) {
-          event.preventDefault()
-          event.stopImmediatePropagation()
-          handleDownload(element, fileId, isNMM, linkHref)
-          return
-        }
-        if (hasRequirements && !cfg.SkipRequirements) {
-          return
-        }
+        if (hasRequirements && !cfg.SkipRequirements) return
         event.preventDefault()
         event.stopImmediatePropagation()
         handleDownload(element, fileId, isNMM, linkHref)
@@ -315,9 +265,7 @@
       const setupSlowDownloadIntercept = () => {
         const modFileDownload = document.querySelector('mod-file-download')
         if (modFileDownload?.shadowRoot) {
-          const slowDownloadBtn = modFileDownload.shadowRoot.querySelector(
-            '#upsell-cards > div.flex.flex-col.justify-between.gap-y-6.rounded-lg.bg-surface-translucent-low.p-6 > button'
-          )
+          const slowDownloadBtn = modFileDownload.shadowRoot.querySelector('#upsell-cards > div.flex.flex-col.justify-between.gap-y-6.rounded-lg.bg-surface-translucent-low.p-6 > button')
           if (slowDownloadBtn) {
             slowDownloadBtn.addEventListener('click', async event => {
               event.preventDefault()
@@ -328,16 +276,9 @@
               const isNMM = params.has('nmm') || params.get('nmm') === '1'
               Logger.debug('Slow download intercept: fileId', fileId, 'isNMM', isNMM)
               setButtonState(slowDownloadBtn, 'waiting')
-              const { url, error } = await getDownloadUrl({
-                fileId,
-                gameId: document.getElementById('section')?.dataset?.gameId || '',
-                isNMM,
-                href: location.href
-              })
+              const { url, error } = await getDownloadUrl({ fileId, gameId: getGameId(), isNMM, href: location.href })
               if (error) {
-                setButtonState(slowDownloadBtn, 'error', error)
-                if (cfg.PlayErrorSound) playErrorSound()
-                if (cfg.ShowAlertsOnError) alert(`Download error: ${error}`)
+                handleError(slowDownloadBtn, error)
                 return
               }
               if (url) {
@@ -351,9 +292,7 @@
       }
 
       setupSlowDownloadIntercept()
-      const observer = new MutationObserver(() => {
-        setupSlowDownloadIntercept()
-      })
+      const observer = new MutationObserver(setupSlowDownloadIntercept)
       observer.observe(document.body, { childList: true, subtree: true })
     }
   }
@@ -382,23 +321,13 @@
     const isNMM = params.has('nmm') || params.get('nmm') === '1'
     Logger.debug('Auto-start: fileId', fileId, 'isNMM', isNMM)
     await new Promise(r => setTimeout(r, 200))
-    const { url, error } = await getDownloadUrl({
-      fileId,
-      gameId: document.getElementById('section')?.dataset?.gameId || '',
-      isNMM,
-      href: location.href
-    })
+    const { url, error } = await getDownloadUrl({ fileId, gameId: getGameId(), isNMM, href: location.href })
     if (error) {
-      Logger.error('Auto-start download error:', error)
-      if (cfg.PlayErrorSound) playErrorSound()
-      if (cfg.ShowAlertsOnError) alert(`Download error: ${error}`)
+      handleError(null, error)
       return
     }
     if (url) {
-      Logger.info(
-        `Auto ${isNMM ? 'NMM' : 'manual'}: final URL type`,
-        url.startsWith('nxm://') ? 'nxm' : url.startsWith('https://') ? 'https' : 'other'
-      )
+      Logger.info(`Auto ${isNMM ? 'NMM' : 'manual'}: final URL type`, url.startsWith('nxm://') ? 'nxm' : url.startsWith('https://') ? 'https' : 'other')
       location.assign(url)
       if (cfg.AutoCloseTab) setTimeout(() => window.close(), cfg.CloseTabDelay)
     }
@@ -407,18 +336,15 @@
   function upsellBlocker() {
     if (!cfg.HidePremiumUpsells) return
     const elementsToHideSelectors = [
-      // IDs
       '#nonPremiumBanner',
       '#freeTrialBanner',
       '#ig-banner-container',
       '#rj-vortex',
-      // broad class matches for dynamic content
       '[class*="ads-bottom"]',
       '[class*="ads-top"]',
       '[class*="to-premium"]',
       '[class*="from-premium"]',
       '[class*="premium"]',
-      // specific page elements
       '#mainContent > div.ads-holder.clearfix.ads-top',
       '#mainContent > div.ads-holder.clearfix.ads-bottom',
       '#mainContent > div > div.relative.next-container > div > section.flex.items-center.justify-center > div',
@@ -427,22 +353,18 @@
       '#head > div.rj-right-tray.rj-profile-tray.rj-open > ul > li.user-profile-menu-section-top > a',
       '#mainContent > div.flex.items-center.justify-center.gap-x-4.border-y.border-stroke-subdued.bg-surface-low.py-2',
       '#mainContent > div.hidden.items-center.justify-center.gap-x-4.border-b.border-stroke-subdued.bg-surface-low.py-2.md\\:flex',
-      '#mainContent > div.relative > div.relative.next-container.pb-20 > div.space-y-16 > div.relative.overflow-hidden.rounded-lg.border-2.border-\[\#FCD23F\]',
+      '#mainContent > div.relative > div.relative.next-container.pb-20 > div.space-y-16 > div.relative.overflow-hidden.rounded-lg.border-2.border-\\[\\#FCD23F\\]',
       '#mainContent > div.relative > div.relative.next-container.pb-20 > div.mb-6.w-full.space-y-6.border-b.border-stroke-weak.pt-4.pb-6.sm\\:mb-0.sm\\:border-none.sm\\:pb-8 > section > div.flex.flex-col.gap-2.rounded-sm.bg-surface-translucent-low.p-2.5.backdrop-blur-xs.xs\\:w-fit.xs\\:max-w-sm.order-4.h-fit.w-full',
       '#filters-panel > div.mt-4.hidden.rounded-lg.border.border-creator-subdued.bg-creator-weak.bg-cover.p-4'
     ]
-    // hide all selectors
-    GM_addStyle(elementsToHideSelectors.map(selector => `${selector}{display:none!important}`).join('\n'))
+    GM_addStyle(elementsToHideSelectors.map(s => `${s}{display:none!important}`).join('\n'))
 
-    // hide upsells in shadow root
     const modFileDownloadElement = document.querySelector('mod-file-download')
     if (modFileDownloadElement?.shadowRoot) {
       const shadowStyle = document.createElement('style')
-      shadowStyle.textContent =
-        '#upsell-cards > div.relative.flex.flex-col.justify-between.gap-y-6.rounded-lg.border.bg-gradient-to-t.from-premium-weak.from-25\\%.to-premium-900.to-75\\%.p-6.sm\\:order-last.border-premium-100.border-premium-moderate{display:none!important}'
+      shadowStyle.textContent = '#upsell-cards > div.relative.flex.flex-col.justify-between.gap-y-6.rounded-lg.border.bg-gradient-to-t.from-premium-weak.from-25\\%.to-premium-900.to-75\\%.p-6.sm\\:order-last.border-premium-100.border-premium-moderate{display:none!important}'
       modFileDownloadElement.shadowRoot.appendChild(shadowStyle)
     }
-    // hide premium upsell banner
     const premiumBanner = document.querySelector('.bg-nexus-premium-gradient')
     if (premiumBanner) {
       premiumBanner.remove()
@@ -452,10 +374,11 @@
 
   function waitForElement(selector, cb) {
     const el = document.querySelector(selector)
-    if (el) cb(el)
+    if (el) return cb(el)
     const mo = new MutationObserver(() => {
       const el = document.querySelector(selector)
       if (el) {
+        mo.disconnect()
         cb(el)
       }
     })
@@ -468,15 +391,9 @@
     if (url.includes('tab=files') && !url.includes('category=archived')) {
       waitForElement('#files-tab-footer', footer => {
         footer.querySelector('p')?.style.setProperty('display', 'none')
-        // Check for any existing 'File archive' button
-        const hasArchiveBtn = Array.from(footer.querySelectorAll('a.btn.inline-flex .flex-label')).some(
-          el => el.textContent.trim() === 'File archive'
-        )
+        const hasArchiveBtn = Array.from(footer.querySelectorAll('a.btn.inline-flex .flex-label')).some(el => el.textContent.trim() === 'File archive')
         if (!hasArchiveBtn) {
-          footer.insertAdjacentHTML(
-            'beforeend',
-            `<a class="btn inline-flex" data-archived-btn="true" href="${url}&category=archived" style="background:#da8e35;color:#fff;margin-left:8px;"><span class="flex-label">File archive</span></a>`
-          )
+          footer.insertAdjacentHTML('beforeend', `<a class="btn inline-flex" data-archived-btn="true" href="${url}&category=archived" style="background:#da8e35;color:#fff;margin-left:8px;"><span class="flex-label">File archive</span></a>`)
         }
       })
     }
@@ -490,16 +407,19 @@
       if (!fileId || !box || box.dataset.done) continue
       box.dataset.done = '1'
       box.innerHTML = `
-      <a class="btn inline-flex" href="${base}?tab=files&file_id=${fileId}&nmm=1"><span class="flex-label">Mod manager download</span></a>
-      <a class="btn inline-flex" href="${base}?tab=files&file_id=${fileId}"><span class="flex-label">Manual download</span></a>
-    `
+        <a class="btn inline-flex" href="${base}?tab=files&file_id=${fileId}&nmm=1"><span class="flex-label">Mod manager download</span></a>
+        <a class="btn inline-flex" href="${base}?tab=files&file_id=${fileId}"><span class="flex-label">Manual download</span></a>
+      `
     }
   }
 
   function main() {
     setupAudio()
-    attachClickInterceptor()
-    interceptRequirementsTab()
+    if (!listenersAttached) {
+      attachClickInterceptor()
+      interceptRequirementsTab()
+      listenersAttached = true
+    }
     autoStartDownload()
     upsellBlocker()
     archivedFileHandler()
@@ -517,7 +437,7 @@
       },
       {
         key: 'AutoCloseTab',
-        label: 'Auto-Close Tab After Automatic Download ',
+        label: 'Auto-Close Tab After AutoStartDownload',
         type: 'bool',
         description: 'Automatically close the tab after a download starts on file download pages',
         showIf: () => cfg.AutoStartDownload
@@ -540,13 +460,11 @@
         type: 'bool',
         description: 'Play an error sound when download errors occur'
       },
-
       {
         key: 'HidePremiumUpsells',
         label: 'Hide Premium Upsells & misc Annoyances (experimental)',
         type: 'bool',
-        description:
-          'Hide premium upgrade banners, trial offers, and other Annoyances on the site (experimental)\n slow and buggy, you are probably better off using an adblocker.'
+        description: 'Hide premium upgrade banners, trial offers, and other annoyances on the site (experimental). You are probably better off using an adblocker.'
       },
       {
         key: 'RequestTimeout',
@@ -577,8 +495,7 @@
     ]
     const STYLES = {
       btn: "position:fixed;bottom:20px;right:20px;background:#2f2f2f;color:#fff;padding:10px 15px;border-radius:4px;cursor:pointer;z-index:9999;font-family:'Inter','Helvetica Neue', Helvetica, Arial, sans-serif;font-size:14px;border:none;",
-      modal:
-        "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2f2f2f;color:#dadada;padding:25px;border-radius:4px;z-index:10000;min-width:300px;max-width:90%;max-height:90vh;overflow-y:auto;font-family:'Inter','Helvetica Neue', Helvetica, Arial, sans-serif;",
+      modal: "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2f2f2f;color:#dadada;padding:25px;border-radius:4px;z-index:10000;min-width:300px;max-width:90%;max-height:90vh;overflow-y:auto;font-family:'Inter','Helvetica Neue', Helvetica, Arial, sans-serif;",
       backdrop: 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.5);z-index:9999;',
       section: 'background:#363636;padding:15px;border-radius:4px;margin-bottom:15px;',
       sectionHeader: 'color:#da8e35;margin:0 0 10px 0;font-size:16px;font-weight:500;',
@@ -587,24 +504,36 @@
       label: 'display:flex;align-items:center;gap:8px;',
       btnObj: {
         primary: 'padding:8px 15px;border:none;background:#da8e35;color:white;border-radius:3px;cursor:pointer;',
-        secondary:
-          'padding:8px 15px;border:1px solid #da8e35;background:transparent;color:#da8e35;border-radius:3px;cursor:pointer;',
+        secondary: 'padding:8px 15px;border:1px solid #da8e35;background:transparent;color:#da8e35;border-radius:3px;cursor:pointer;',
         advanced: 'padding:4px 8px;background:transparent;color:#666;border:none;cursor:pointer;',
-        closeX:
-          'position:absolute;top:10px;right:10px;background:transparent;border:none;color:#fff;font-size:18px;cursor:pointer;line-height:1;padding:5px;'
+        closeX: 'position:absolute;top:10px;right:10px;background:transparent;border:none;color:#fff;font-size:18px;cursor:pointer;line-height:1;padding:5px;'
       }
     }
+
     function save() {
       try {
         GM_setValue(CONFIG_KEY, JSON.stringify(cfg))
       } catch (e) {}
     }
+
     let activeModal = null
     let activeBackdrop = null
+
+    function closeModal() {
+      activeModal?.remove()
+      activeModal = null
+      activeBackdrop?.remove()
+      activeBackdrop = null
+      document.removeEventListener('keydown', onSettingsKeyDown)
+    }
+
+    const onSettingsKeyDown = event => {
+      if (event.key === 'Escape') closeModal()
+    }
+
     function showSettingsModal() {
       cfg = loadConfig()
-      if (activeModal) activeModal.remove()
-      if (activeBackdrop) activeBackdrop.remove()
+      closeModal()
 
       const backdrop = document.createElement('div')
       backdrop.style.cssText = STYLES.backdrop
@@ -617,14 +546,12 @@
 
       const build = setting => {
         const shouldShow = !setting.showIf || setting.showIf()
-        if (setting.type === 'bool')
-          return `<div style="${STYLES.row};display:${shouldShow ? 'block' : 'none'}"><label title="${setting.description}" style="${STYLES.label}"><input type="checkbox" data-setting="${setting.key}" ${cfg[setting.key] ? 'checked' : ''}><span>${setting.label}</span></label></div>`
+        if (setting.type === 'bool') return `<div style="${STYLES.row};display:${shouldShow ? 'block' : 'none'}"><label title="${setting.description}" style="${STYLES.label}"><input type="checkbox" data-setting="${setting.key}" ${cfg[setting.key] ? 'checked' : ''}><span>${setting.label}</span></label></div>`
         if (setting.type === 'number') {
           const step = setting.key === 'CloseTabDelay' ? 100 : 1
           return `<div style="${STYLES.row};display:${shouldShow ? 'block' : 'none'}"><label title="${setting.description}" style="${STYLES.label}"><span>${setting.label}:</span><input type="number" value="${cfg[setting.key]}" min="0" step="${step}" data-setting="${setting.key}" style="${STYLES.input};width:120px;"></label></div>`
         }
-        if (setting.type === 'text')
-          return `<div style="${STYLES.row};display:${shouldShow ? 'block' : 'none'}"><label title="${setting.description}" style="${STYLES.label}"><span style="font-size:0.9em;color:#aaa;">${setting.label}:</span><input type="text" value="${cfg[setting.key]}" data-setting="${setting.key}" style="${STYLES.input};width:95%;"></label></div>`
+        if (setting.type === 'text') return `<div style="${STYLES.row};display:${shouldShow ? 'block' : 'none'}"><label title="${setting.description}" style="${STYLES.label}"><span style="font-size:0.9em;color:#aaa;">${setting.label}:</span><input type="text" value="${cfg[setting.key]}" data-setting="${setting.key}" style="${STYLES.input};width:95%;"></label></div>`
         return ''
       }
 
@@ -649,12 +576,7 @@
       const update = element => {
         const key = element.getAttribute('data-setting')
         if (!key) return
-        let value =
-          element.type === 'checkbox'
-            ? element.checked
-            : element.type === 'number'
-              ? parseInt(element.value, 10)
-              : element.value
+        let value = element.type === 'checkbox' ? element.checked : element.type === 'number' ? parseInt(element.value, 10) : element.value
         if (typeof value === 'number' && isNaN(value)) {
           element.value = cfg[key]
           return
@@ -681,35 +603,12 @@
         if (event.target?.hasAttribute('data-setting')) update(event.target)
       })
       modal.addEventListener('input', event => {
-        if (
-          (event.target.type === 'number' || event.target.type === 'text') &&
-          event.target?.hasAttribute('data-setting')
-        )
-          update(event.target)
+        if ((event.target.type === 'number' || event.target.type === 'text') && event.target?.hasAttribute('data-setting')) update(event.target)
       })
 
-      const closeX = modal.querySelector('#closeSettingsX')
-      const closeBtn = modal.querySelector('#closeSettings')
-      const resetBtn = modal.querySelector('#resetSettings')
-
-      function closeModal() {
-        if (activeModal) {
-          activeModal.remove()
-          activeModal = null
-        }
-        if (activeBackdrop) {
-          activeBackdrop.remove()
-          activeBackdrop = null
-        }
-        document.removeEventListener('keydown', onSettingsKeyDown)
-      }
-      const onSettingsKeyDown = event => {
-        if (event.key === 'Escape') closeModal()
-      }
-
-      closeX.addEventListener('click', closeModal)
-      closeBtn.addEventListener('click', closeModal)
-      resetBtn.addEventListener('click', async () => {
+      modal.querySelector('#closeSettingsX').addEventListener('click', closeModal)
+      modal.querySelector('#closeSettings').addEventListener('click', closeModal)
+      modal.querySelector('#resetSettings').addEventListener('click', async () => {
         await cleanResetConfig()
         closeModal()
       })
@@ -729,44 +628,32 @@
       document.body.appendChild(btn)
       // keep button persistent if removed by react hydration -.-
       const observer = new MutationObserver(() => {
-        if (!document.getElementById('nnwpp-btn')) {
-          document.body.appendChild(btn)
-        }
+        if (!document.getElementById('nnwpp-btn')) document.body.appendChild(btn)
       })
       observer.observe(document.body, { childList: true, subtree: true })
     }
   }
 
   main() // first run
-  // spa navigation support to re-run main() on URL change
+
+  // SPA navigation support
   let lastUrl = location.href
   const originalPushState = history.pushState
   const originalReplaceState = history.replaceState
-  history.pushState = function (...args) {
-    originalPushState.apply(this, args)
+
+  function onNavigate() {
     if (location.href !== lastUrl) {
       lastUrl = location.href
       main()
     }
+  }
+  history.pushState = function (...args) {
+    originalPushState.apply(this, args)
+    onNavigate()
   }
   history.replaceState = function (...args) {
     originalReplaceState.apply(this, args)
-    if (location.href !== lastUrl) {
-      lastUrl = location.href
-      main()
-    }
+    onNavigate()
   }
-  window.addEventListener('popstate', () => {
-    if (location.href !== lastUrl) {
-      lastUrl = location.href
-      main()
-    }
-  })
-  // fallback for other changes
-  new MutationObserver(() => {
-    if (location.href !== lastUrl) {
-      lastUrl = location.href
-      main()
-    }
-  }).observe(document.body, { subtree: true, childList: true })
+  window.addEventListener('popstate', onNavigate)
 })()
