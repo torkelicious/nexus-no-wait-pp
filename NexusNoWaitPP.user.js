@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.1.0
+// @version     2.1.1
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -106,6 +106,11 @@
       errorAudioPlayer.currentTime = 0
       errorAudioPlayer.play().catch(e => Logger.warn('Error playing sound:', e))
     }
+  }
+
+  const MOD_PAGE_PATTERN = /\/mods\/\d+$/
+  function isModPage() {
+    return MOD_PAGE_PATTERN.test(location.pathname)
   }
 
   function parseDownloadURLFromResponse(text) {
@@ -240,14 +245,28 @@
       return null
     }
 
+    const IGNORE_ANCESTORS = 'nav, .nav, .pagination, .comment-container, .comment-content, .forum-post, .header-nav, .search-results, #nnwpp-btn'
+    const DOWNLOAD_HREF_PATTERNS = ['/Core/Libs/Common/', 'tab=files&file_id=', 'file_id=', 'ModRequirementsPopUp']
+
+    const isDownloadHref = href => DOWNLOAD_HREF_PATTERNS.some(pattern => href.includes(pattern))
+
     document.body.addEventListener(
       'click',
       async function (event) {
+        if (!isModPage()) return
+
         const element = event.target.closest('a,button')
         if (!element) return
 
+        // skip elements in non-download areas of the page
+        if (element.closest(IGNORE_ANCESTORS)) return
+
         const linkHref = element.href || element.getAttribute('href') || ''
         if (!linkHref) return
+
+        // only intercept if the href looks like a Nexus download link
+        if (!isDownloadHref(linkHref)) return
+
         const fileId = extractFileId(linkHref)
         if (!fileId) return
 
@@ -315,6 +334,7 @@
 
   async function autoStartDownload() {
     if (!cfg.AutoStartDownload) return
+    if (!isModPage()) return
     const params = new URLSearchParams(location.search)
     const fileId = params.get('file_id')
     if (!fileId) return
@@ -387,6 +407,7 @@
 
   function archivedFileHandler() {
     if (!cfg.HandleArchivedFiles) return
+    if (!isModPage()) return
     const url = location.href
     if (url.includes('tab=files') && !url.includes('category=archived')) {
       waitForElement('#files-tab-footer', footer => {
@@ -415,6 +436,7 @@
 
   function main() {
     setupAudio()
+    SettingsUI()
     if (!listenersAttached) {
       attachClickInterceptor()
       interceptRequirementsTab()
@@ -423,7 +445,6 @@
     autoStartDownload()
     upsellBlocker()
     archivedFileHandler()
-    SettingsUI()
     Logger.debug('NNW++ initiated')
   }
 
