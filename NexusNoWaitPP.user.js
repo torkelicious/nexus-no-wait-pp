@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.1.1
+// @version     2.1.2
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -84,9 +84,16 @@
         ...opts,
         url,
         timeout: opts.timeout ?? cfg.RequestTimeout,
-        onload: r => resolve(r.response || r.responseText || ''),
-        onerror: () => resolve(''),
-        ontimeout: () => resolve('')
+        headers: opts.headers || {},
+        onload: r => {
+          resolve({
+            text: r.responseText || '',
+            finalUrl: r.finalUrl || '',
+            headers: r.responseHeaders || ''
+          })
+        },
+        onerror: () => resolve({ text: '', finalUrl: '', headers: '' }),
+        ontimeout: () => resolve({ text: '', finalUrl: '', headers: '' })
       })
     })
   }
@@ -95,7 +102,7 @@
 
   let errorAudioPlayer = null
   function setupAudio() {
-    if (!cfg.PlayErrorSound || !cfg.ErrorSoundUrl) return
+    if (!cfg.PlayErrorSound || !cfg.ErrorSoundUrl || errorAudioPlayer) return
     errorAudioPlayer = new Audio(cfg.ErrorSoundUrl)
     errorAudioPlayer.preload = 'auto'
     errorAudioPlayer.load()
@@ -125,51 +132,82 @@
     return null
   }
 
-  async function getDownloadUrl({ fileId, gameId, isNMM, href }) {
-    if (!fileId) return { url: null, error: 'Missing fileId' }
+  function parseDownloadLink(text) {
+    if (!text) return null
 
-    const fetchText = async url => {
-      try {
-        const r = await fetch(url, {
-          credentials: 'same-origin',
-          headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        })
-        return await r.text()
-      } catch (err) {
-        Logger.warn('Native fetch failed for', url, err, ' falling back to GM XHR')
-        return gmRequest(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-      }
-    }
+    text = String(text).replace(/&amp;/g, '&').replace(/\\\//g, '/')
 
-    const parseDownloadLink = text => {
-      if (!text) return null
-      const nxmMatch = text.match(/(nxm:\/\/[\w\W]+?)(["'\s<>]|$)/i)
-      if (nxmMatch) return nxmMatch[1]
-      const keyMatch = text.match(/['"]([^'"']*?key[^'"']*?)['"]/)
-      if (keyMatch) return keyMatch[1]
+    const match = text.match(/nxm:\/\/[^\s"'<>]+/i)
+    if (!match) return null
+
+    const url = match[0]
+
+    const queryIndex = url.indexOf('?')
+    if (queryIndex === -1) return null
+
+    const params = new URLSearchParams(url.slice(queryIndex + 1))
+
+    if (!params.has('key') || !params.has('expires') || !params.has('user_id')) {
       return null
     }
 
-    if (isNMM && href) {
-      const firstResponse = await fetchText(href)
-      Logger.info('First NMM fetch URL:', href)
-      Logger.info('First NMM response:', firstResponse)
+    return url
+  }
 
-      const link = parseDownloadLink(firstResponse)
+  async function getDownloadUrl({ fileId, gameId, isNMM, href }) {
+    if (!fileId) return { url: null, error: 'Missing fileId' }
+
+    if (isNMM && href) {
+      Logger.info('NMM flow start:', href)
+
+      // Try GM request (redirects properly :DDDDD)
+      const res = await gmRequest(href, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+      })
+
+      Logger.info('GM final URL:', res.finalUrl)
+      Logger.info('GM headers:', res.headers)
+
+      // finalUrl is already nxm://
+      let link = parseDownloadLink(res.finalUrl)
       if (link) return { url: link }
 
+      // Location header contains nxm://
+      const locationMatch = res.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i)
+      if (locationMatch) {
+        link = locationMatch[1]
+        return { url: link }
+      }
+
+      // old behavior fallback
+      link = parseDownloadLink(res.text)
+      if (link) return { url: link }
+
+      // requirements popup handling
       if (/ModRequirementsPopUp/.test(href)) {
-        const downloadHrefMatch = firstResponse.match(/href=["']([^"']*?file_id[^"']*?)["']/i)
+        const downloadHrefMatch = res.text.match(/href=["']([^"']*?file_id[^"']*?)["']/i)
+
         if (downloadHrefMatch) {
-          const downloadUrl = downloadHrefMatch[1]
-          Logger.info('Parsed download URL from popup:', downloadUrl)
-          const downloadPageResponse = await fetchText(downloadUrl)
-          Logger.info('Download page response:', downloadPageResponse)
-          const link2 = parseDownloadLink(downloadPageResponse)
-          if (link2) return { url: link2 }
+          const nextUrl = downloadHrefMatch[1]
+          Logger.info('Following requirements URL:', nextUrl)
+
+          const res2 = await gmRequest(nextUrl)
+
+          Logger.info('Second GM final URL:', res2.finalUrl)
+
+          // same logic again
+          link = parseDownloadLink(res2.finalUrl)
+          if (link) return { url: link }
+
+          const locationMatch2 = res2.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i)
+          if (locationMatch2) return { url: locationMatch2[1] }
+
+          link = parseDownloadLink(res2.text)
+          if (link) return { url: link }
         }
       }
-      return { url: null, error: 'No NMM download link found' }
+
+      return { url: null, error: 'No NMM download link found (flow changed?)' }
     }
 
     // Manual logic
@@ -194,12 +232,13 @@
       return { url: null, error: 'No URL in response\n(Are you logged in?)' }
     } catch (fetchErr) {
       Logger.warn('Native fetch POST failed, falling back to GM XHR:', fetchErr)
-      const responseText = await gmRequest(endpoint, {
+      const res = await gmRequest(endpoint, {
         method: 'POST',
         data: body,
         headers: { ...headers, Origin: 'https://www.nexusmods.com', Referer: location.href }
       })
-      const extracted = parseDownloadURLFromResponse(responseText)
+      // gmRequest now returns an object :-P
+      const extracted = parseDownloadURLFromResponse(res.text)
       if (extracted) return { url: extracted.url }
       return { url: null, error: 'No URL in response\n(Are you logged in?)' }
     }
@@ -353,8 +392,10 @@
     }
   }
 
+  let upsellsHidden = false
   function upsellBlocker() {
-    if (!cfg.HidePremiumUpsells) return
+    if (!cfg.HidePremiumUpsells || upsellsHidden) return
+    upsellsHidden = true
     const elementsToHideSelectors = [
       '#nonPremiumBanner',
       '#freeTrialBanner',
