@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.1.3
+// @version     2.1.4
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -22,7 +22,6 @@
 ;(function () {
   'use strict'
 
-  // Config
   const CONFIG_KEY = 'NexusNoWaitPP'
   const DEFAULTS = {
     AutoStartDownload: true,
@@ -64,8 +63,7 @@
     }, {})
   })()
 
-  // prefer GM.xmlHttpRequest but keep GM_xmlhttpRequest fallback for compatibility !!!
-  // (the script tries fetch though mostly now as it seems faster... // ? not sure how good it works though...)
+  const logEvent = (level, event, data = {}) => Logger[level](event, data)
   const gmXmlHttpRequest = typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest.bind(GM) : typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : null
 
   if (!gmXmlHttpRequest) Logger.error('No GM XHR API available script may not function correctly.')
@@ -139,7 +137,7 @@
     if (!fileId && !href) return { url: null, error: 'Missing fileId' }
 
     if (href && href.includes('/api/files/')) {
-      Logger.info('Resolving new API link in background:', href)
+      logEvent('info', 'download:resolve-api', { href })
       let targetApiUrl = href
       if (isNMM && !targetApiUrl.includes('nmm=1')) {
         targetApiUrl += (targetApiUrl.includes('?') ? '&' : '?') + 'nmm=1'
@@ -170,13 +168,11 @@
       let link = parseDownloadLink(res.finalUrl)
       if (link) return { url: link }
 
-      // Location header contains nxm://
       const locationMatch = res.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i)
       if (locationMatch) return { url: locationMatch[1] }
       link = parseDownloadLink(res.text)
       if (link) return { url: link }
 
-      // requirements popup handling
       if (/ModRequirementsPopUp/.test(href)) {
         const downloadHrefMatch = res.text.match(/href=["']([^"']*?file_id[^"']*?)["']/i)
 
@@ -228,6 +224,42 @@
     return { url: null, error: 'Could not resolve file link' }
   }
 
+  async function normalizeDownloadUrl(url, isNMM) {
+    if (!url) return url
+    if (url.includes('nexusmods.com') && url.includes('file_id=')) {
+      try {
+        const parsed = new URL(url, location.href)
+        const fileId = parsed.searchParams.get('file_id')
+        if (fileId) {
+          const res = await getDownloadUrl({
+            fileId,
+            gameId: getGameId(),
+            isNMM,
+            href: url
+          })
+          if (res?.url) return res.url
+        }
+      } catch {}
+    }
+    return url
+  }
+
+  async function startDownloadFlow({ btn, fileId, isNMM, href, isAutoStart = false }) {
+    if (btn) setButtonState(btn, 'waiting')
+    logEvent(isAutoStart ? 'debug' : 'debug', isAutoStart ? 'download:auto-start' : 'download:start', { fileId, isNMM })
+
+    const { url, error } = await getDownloadUrl({ fileId, gameId: getGameId(), isNMM, href })
+    if (error) return handleError(btn || null, error)
+
+    if (btn) setButtonState(btn, 'downloading')
+
+    const finalUrl = await normalizeDownloadUrl(url, isNMM)
+    if (!finalUrl) return handleError(btn || null, 'Failed to resolve download URL')
+
+    logEvent('info', 'download:resolved', { url: finalUrl })
+    location.assign(finalUrl)
+  }
+
   function setButtonState(button, state, message) {
     const textElement = button.querySelector('span.flex-label, span') || button
     const stateConfig = {
@@ -248,15 +280,6 @@
   }
 
   function attachClickInterceptor() {
-    async function handleDownload(btn, fileId, isNMM, href) {
-      setButtonState(btn, 'waiting')
-      Logger.debug('fileId', fileId, 'isNMM', isNMM)
-      const { url, error } = await getDownloadUrl({ fileId, gameId: getGameId(), isNMM, href })
-      if (error) return handleError(btn, error)
-      setButtonState(btn, 'downloading')
-      location.assign(url)
-    }
-
     const extractFileId = href => {
       try {
         const url = new URL(href, location.href)
@@ -294,7 +317,7 @@
                   dlUrl = isNMM ? links.vortexDownloadUrl || links.downloadUrl : links.downloadUrl
                 } catch {}
               }
-              if (dlUrl) return handleDownload(btn, null, isNMM, dlUrl)
+              if (dlUrl) return startDownloadFlow({ btn, fileId: null, isNMM, href: dlUrl })
             }
           }
         }
@@ -314,7 +337,7 @@
 
         event.preventDefault()
         event.stopImmediatePropagation()
-        handleDownload(element, fileId, isNMM, linkHref)
+        startDownloadFlow({ btn: element, fileId, isNMM, href: linkHref })
       },
       true
     )
@@ -341,11 +364,8 @@
     const fileId = params.get('file_id')
     if (!fileId) return
     const isNMM = params.has('nmm') || params.get('nmm') === '1'
-    Logger.debug('Auto-start: fileId', fileId, 'isNMM', isNMM)
     await new Promise(r => setTimeout(r, 200))
-    const { url, error } = await getDownloadUrl({ fileId, gameId: getGameId(), isNMM, href: location.href })
-    if (error) return handleError(null, error)
-    location.assign(url)
+    await startDownloadFlow({ fileId, isNMM, href: location.href, isAutoStart: true })
     if (cfg.AutoCloseTab) setTimeout(() => window.close(), cfg.CloseTabDelay)
   }
 
@@ -442,7 +462,6 @@
     upsellBlocker()
     archivedFileHandler()
 
-    // support SPA test.....
     if (slowDownloadObserver) {
       slowDownloadObserver.disconnect()
       slowDownloadObserver = null
@@ -461,12 +480,8 @@
               const fid = params.get('file_id')
               if (!fid) return
               const isNMM = params.has('nmm') || params.get('nmm') === '1'
-              Logger.debug('Slow download intercept: fileId', fid, 'isNMM', isNMM)
-              setButtonState(slowDownloadBtn, 'waiting')
-              const { url, error } = await getDownloadUrl({ fileId: fid, gameId: getGameId(), isNMM, href: location.href })
-              if (error) return handleError(slowDownloadBtn, error)
-              setButtonState(slowDownloadBtn, 'downloading')
-              location.assign(url)
+              logEvent('debug', 'download:slow-intercept', { fileId: fid, isNMM })
+              await startDownloadFlow({ btn: slowDownloadBtn, fileId: fid, isNMM, href: location.href })
             })
           }
         }
@@ -476,7 +491,7 @@
       slowDownloadObserver.observe(document.body, { childList: true, subtree: true })
     }
 
-    Logger.debug('NNW++ initiated')
+    logEvent('info', 'init', { url: location.href })
   }
 
   function SettingsUI() {
@@ -625,7 +640,7 @@
       btn.onclick = showSettingsModal
       btn.onmouseover = () => (btn.style.transform = 'translateY(-2px)')
       btn.onmouseout = () => (btn.style.transform = 'none')
-      document.body.appendChild(btn) // keep button persistent if removed by react hydration -.-
+      document.body.appendChild(btn)
       const observer = new MutationObserver(() => {
         if (!document.getElementById('nnwpp-btn')) document.body.appendChild(btn)
       })
@@ -633,9 +648,8 @@
     }
   }
 
-  main() // first run
+  main()
 
-  // SPA navigation support
   let lastUrl = location.href
   const originalPushState = history.pushState
   const originalReplaceState = history.replaceState
