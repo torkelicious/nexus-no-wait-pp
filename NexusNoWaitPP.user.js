@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.1.4
+// @version     2.1.5
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -32,28 +32,10 @@
     ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/errorsound.mp3',
     HandleArchivedFiles: true,
     HidePremiumUpsells: false,
+    ForceModManagerDownload: false,
     CloseTabDelay: 2000,
     RequestTimeout: 30000
   }
-
-  function loadConfig() {
-    try {
-      const raw = typeof GM_getValue === 'function' ? GM_getValue(CONFIG_KEY, null) : null
-      return raw ? { ...DEFAULTS, ...(typeof raw === 'string' ? JSON.parse(raw) : raw) } : DEFAULTS
-    } catch {
-      return DEFAULTS
-    }
-  }
-
-  function cleanResetConfig() {
-    Object.assign(cfg, DEFAULTS)
-    if (typeof GM_setValue === 'function') GM_setValue(CONFIG_KEY, JSON.stringify(cfg))
-    location.reload()
-  }
-
-  let cfg = loadConfig()
-  let listenersAttached = false
-  let slowDownloadObserver = null
 
   const Logger = (() => {
     const tag = () => `[NexusNoWait++ v${GM_info.script.version}]`
@@ -64,9 +46,34 @@
   })()
 
   const logEvent = (level, event, data = {}) => Logger[level](event, data)
+
+  function loadConfig() {
+    try {
+      const raw = typeof GM_getValue === 'function' ? GM_getValue(CONFIG_KEY, null) : null
+      const parsed = raw ? { ...DEFAULTS, ...(typeof raw === 'string' ? JSON.parse(raw) : raw) } : DEFAULTS
+      logEvent('debug', 'config:load', { activeConfig: parsed })
+      return parsed
+    } catch (e) {
+      Logger.warn('Failed to load config, using defaults', e)
+      return DEFAULTS
+    }
+  }
+
+  function cleanResetConfig() {
+    logEvent('info', 'config:reset-requested')
+    Object.assign(cfg, DEFAULTS)
+    if (typeof GM_setValue === 'function') GM_setValue(CONFIG_KEY, JSON.stringify(cfg))
+    location.reload()
+  }
+
+  let cfg = loadConfig()
+  let listenersAttached = false
+  let slowDownloadObserver = null
+  let forceNmmObserver = null
+
   const gmXmlHttpRequest = typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest.bind(GM) : typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : null
 
-  if (!gmXmlHttpRequest) Logger.error('No GM XHR API available script may not function correctly.')
+  if (!gmXmlHttpRequest) Logger.error('No GM XHR API available. Script may not function correctly.')
 
   function gmRequest(url, opts = {}) {
     return new Promise(resolve => {
@@ -76,9 +83,20 @@
         url,
         timeout: opts.timeout ?? cfg.RequestTimeout,
         headers: opts.headers || {},
-        onload: r => resolve({ text: r.responseText || '', finalUrl: r.finalUrl || '', headers: r.responseHeaders || '' }),
-        onerror: () => resolve({ text: '', finalUrl: '', headers: '' }),
-        ontimeout: () => resolve({ text: '', finalUrl: '', headers: '' })
+        onload: r =>
+          resolve({
+            text: r.responseText || '',
+            finalUrl: r.finalUrl || '',
+            headers: r.responseHeaders || ''
+          }),
+        onerror: e => {
+          logEvent('error', 'network:request-failed', { url, error: e })
+          resolve({ text: '', finalUrl: '', headers: '' })
+        },
+        ontimeout: () => {
+          logEvent('warn', 'network:request-timeout', { url })
+          resolve({ text: '', finalUrl: '', headers: '' })
+        }
       })
     })
   }
@@ -110,24 +128,21 @@
     try {
       const json = JSON.parse(String(text))
       if (json?.url) return { url: json.url.replace(/&amp;/g, '&') }
-    } catch {}
+    } catch {
+      /* empty */
+    }
     const match = String(text).match(/id=["']dl_link["'][^>]*value=["']([^"']+)["']/i)
     return match ? { url: match[1].replace(/&amp;/g, '&') } : null
   }
 
   function parseDownloadLink(text) {
     if (!text) return null
-
     text = String(text).replace(/&amp;/g, '&').replace(/\\\//g, '/')
-
     const match = text.match(/nxm:\/\/[^\s"'<>]+/i)
     if (!match) return null
-
     const url = match[0]
-
     const queryIndex = url.indexOf('?')
     if (queryIndex === -1) return null
-
     const params = new URLSearchParams(url.slice(queryIndex + 1))
     if (!params.has('key') || !params.has('expires') || !params.has('user_id')) return null
     return url
@@ -135,7 +150,6 @@
 
   async function getDownloadUrl({ fileId, gameId, isNMM, href }) {
     if (!fileId && !href) return { url: null, error: 'Missing fileId' }
-
     if (href && href.includes('/api/files/')) {
       logEvent('info', 'download:resolve-api', { href })
       let targetApiUrl = href
@@ -164,7 +178,9 @@
     }
 
     if (isNMM && href) {
-      const res = await gmRequest(href, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      const res = await gmRequest(href, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+      })
       let link = parseDownloadLink(res.finalUrl)
       if (link) return { url: link }
 
@@ -175,15 +191,12 @@
 
       if (/ModRequirementsPopUp/.test(href)) {
         const downloadHrefMatch = res.text.match(/href=["']([^"']*?file_id[^"']*?)["']/i)
-
         if (downloadHrefMatch) {
           const res2 = await gmRequest(downloadHrefMatch[1])
           link = parseDownloadLink(res2.finalUrl)
           if (link) return { url: link }
-
           const locationMatch2 = res2.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i)
           if (locationMatch2) return { url: locationMatch2[1] }
-
           link = parseDownloadLink(res2.text)
           if (link) return { url: link }
         }
@@ -214,7 +227,11 @@
         const res = await gmRequest(endpoint, {
           method: 'POST',
           data: body,
-          headers: { ...headers, Origin: 'https://www.nexusmods.com', Referer: location.href }
+          headers: {
+            ...headers,
+            Origin: 'https://www.nexusmods.com',
+            Referer: location.href
+          }
         })
         const extracted = parseDownloadURLFromResponse(res.text)
         if (extracted) return { url: extracted.url }
@@ -239,16 +256,23 @@
           })
           if (res?.url) return res.url
         }
-      } catch {}
+      } catch {
+        /* empty */
+      }
     }
     return url
   }
 
   async function startDownloadFlow({ btn, fileId, isNMM, href, isAutoStart = false }) {
     if (btn) setButtonState(btn, 'waiting')
-    logEvent(isAutoStart ? 'debug' : 'debug', isAutoStart ? 'download:auto-start' : 'download:start', { fileId, isNMM })
+    logEvent('debug', isAutoStart ? 'download:auto-start' : 'download:start', { fileId, isNMM, href })
 
-    const { url, error } = await getDownloadUrl({ fileId, gameId: getGameId(), isNMM, href })
+    const { url, error } = await getDownloadUrl({
+      fileId,
+      gameId: getGameId(),
+      isNMM,
+      href
+    })
     if (error) return handleError(btn || null, error)
 
     if (btn) setButtonState(btn, 'downloading')
@@ -274,7 +298,7 @@
 
   function handleError(btn, error) {
     if (btn) setButtonState(btn, 'error', error)
-    Logger.error(error)
+    Logger.error('Download Error:', error)
     if (cfg.PlayErrorSound) playErrorSound()
     if (cfg.ShowAlertsOnError) alert(`Download error: ${error}`)
   }
@@ -286,7 +310,9 @@
         const apiMatch = url.pathname.match(/\/api\/files\/(\d+)/)
         if (apiMatch) return apiMatch[1]
         return url.searchParams.get('file_id') || url.searchParams.get('id')
-      } catch {}
+      } catch {
+        /* empty */
+      }
       return null
     }
 
@@ -315,9 +341,14 @@
                 try {
                   const links = JSON.parse(linksStr)
                   dlUrl = isNMM ? links.vortexDownloadUrl || links.downloadUrl : links.downloadUrl
-                } catch {}
+                } catch {
+                  /* empty */
+                }
               }
-              if (dlUrl) return startDownloadFlow({ btn, fileId: null, isNMM, href: dlUrl })
+              if (dlUrl) {
+                logEvent('info', 'requirements:skipped', { isNMM, url: dlUrl })
+                return startDownloadFlow({ btn, fileId: null, isNMM, href: dlUrl })
+              }
             }
           }
         }
@@ -352,6 +383,7 @@
         event.preventDefault()
         event.stopImmediatePropagation()
         const linkHref = linkElement.href || linkElement.getAttribute('href') || ''
+        logEvent('debug', 'navigation:requirements-tab-intercepted')
         location.replace(linkHref.replace('tab=requirements', 'tab=files'))
       },
       true
@@ -366,14 +398,18 @@
     const isNMM = params.has('nmm') || params.get('nmm') === '1'
     await new Promise(r => setTimeout(r, 200))
     await startDownloadFlow({ fileId, isNMM, href: location.href, isAutoStart: true })
-    if (cfg.AutoCloseTab) setTimeout(() => window.close(), cfg.CloseTabDelay)
+    if (cfg.AutoCloseTab) {
+      logEvent('debug', 'tab:closing', { delay: cfg.CloseTabDelay })
+      setTimeout(() => window.close(), cfg.CloseTabDelay)
+    }
   }
 
   let upsellsHidden = false
   function upsellBlocker() {
     if (!cfg.HidePremiumUpsells || upsellsHidden) return
     upsellsHidden = true
-    const elementsToHideSelectors = [
+    logEvent('debug', 'ui:upsell-blocker-active')
+    const selectors = [
       '#nonPremiumBanner',
       '#freeTrialBanner',
       '#ig-banner-container',
@@ -395,7 +431,7 @@
       '#mainContent > div.relative > div.relative.next-container.pb-20 > div.mb-6.w-full.space-y-6.border-b.border-stroke-weak.pt-4.pb-6.sm\\:mb-0.sm\\:border-none.sm\\:pb-8 > section > div.flex.flex-col.gap-2.rounded-sm.bg-surface-translucent-low.p-2.5.backdrop-blur-xs.xs\\:w-fit.xs\\:max-w-sm.order-4.h-fit.w-full',
       '#filters-panel > div.mt-4.hidden.rounded-lg.border.border-creator-subdued.bg-creator-weak.bg-cover.p-4'
     ]
-    GM_addStyle(elementsToHideSelectors.map(s => `${s}{display:none!important}`).join('\n'))
+    GM_addStyle(selectors.map(s => `${s}{display:none!important}`).join('\n'))
 
     const modFileDownloadElement = document.querySelector('mod-file-download')
     if (modFileDownloadElement?.shadowRoot) {
@@ -403,18 +439,17 @@
       shadowStyle.textContent = '#upsell-cards > div.relative.flex.flex-col.justify-between.gap-y-6.rounded-lg.border.bg-gradient-to-t.from-premium-weak.from-25\\%.to-premium-900.to-75\\%.p-6.sm\\:order-last.border-premium-100.border-premium-moderate{display:none!important}'
       modFileDownloadElement.shadowRoot.appendChild(shadowStyle)
     }
-    const premiumBanner = document.querySelector('.bg-nexus-premium-gradient')
-    if (premiumBanner) premiumBanner.remove()
+    document.querySelector('.bg-nexus-premium-gradient')?.remove()
   }
 
   function waitForElement(selector, cb) {
     const el = document.querySelector(selector)
     if (el) return cb(el)
     const mo = new MutationObserver(() => {
-      const el = document.querySelector(selector)
-      if (el) {
+      const target = document.querySelector(selector)
+      if (target) {
         mo.disconnect()
-        cb(el)
+        cb(target)
       }
     })
     mo.observe(document.body, { childList: true, subtree: true })
@@ -428,26 +463,94 @@
         footer.querySelector('p')?.style.setProperty('display', 'none')
         const hasArchiveBtn = Array.from(footer.querySelectorAll('a.btn.inline-flex .flex-label')).some(el => el.textContent.trim() === 'File archive')
         if (!hasArchiveBtn) {
+          logEvent('debug', 'ui:archive-button-restored')
           footer.insertAdjacentHTML('beforeend', `<a class="btn inline-flex" data-archived-btn="true" href="${url}&category=archived" style="background:#da8e35;color:#fff;margin-left:8px;"><span class="flex-label">File archive</span></a>`)
         }
       })
     }
     if (!url.includes('category=archived')) return
-    const headers = Array.from(document.getElementsByClassName('file-expander-header'))
-    const downloads = Array.from(document.getElementsByClassName('accordion-downloads'))
+    const headers = document.getElementsByClassName('file-expander-header')
+    const downloads = document.getElementsByClassName('accordion-downloads')
     const base = location.origin + location.pathname
-    for (const [i, header] of headers.entries()) {
-      const fileId = header?.dataset?.id
+    for (let i = 0; i < headers.length; i++) {
+      const fileId = headers[i]?.dataset?.id
       const box = downloads[i]
       if (!fileId || !box || box.dataset.done) continue
       box.dataset.done = '1'
-
-      const safeFileId = encodeURIComponent(fileId)
+      const safeId = encodeURIComponent(fileId)
       box.innerHTML = `
-        <a class="btn inline-flex" href="${base}?tab=files&file_id=${safeFileId}&nmm=1"><span class="flex-label">Mod manager download</span></a>
-        <a class="btn inline-flex" href="${base}?tab=files&file_id=${safeFileId}"><span class="flex-label">Manual download</span></a>
+        <a class="btn inline-flex" href="${base}?tab=files&file_id=${safeId}&nmm=1"><span class="flex-label">Mod manager download</span></a>
+        <a class="btn inline-flex" href="${base}?tab=files&file_id=${safeId}"><span class="flex-label">Manual download</span></a>
       `
     }
+  }
+
+  function forceModManagerHandler() {
+    if (forceNmmObserver) {
+      forceNmmObserver.disconnect()
+      forceNmmObserver = null
+    }
+    if (!cfg.ForceModManagerDownload || !isModPage()) return
+
+    const injectManagerButtons = () => {
+      const manualLinks = document.querySelectorAll('a[href*="file_id="]:not([href*="nmm=1"]), a.btn[href*="tab=files"]:not([href*="nmm=1"])')
+
+      for (const link of manualLinks) {
+        if (link.dataset.nnwppForcedNmm) continue
+
+        const text = (link.textContent || link.getAttribute('aria-label') || '').toLowerCase()
+        if (!text.includes('manual')) continue
+
+        // look deep in the DOM to find sibling buttons
+        let hasManagerLink = false
+        let searchArea = link.parentElement
+
+        for (let i = 0; i < 3; i++) {
+          if (!searchArea) break
+
+          for (const el of searchArea.querySelectorAll('a, button')) {
+            if (el === link || el.dataset.nnwppForcedNmm) continue
+            const t = (el.textContent || el.getAttribute('aria-label') || '').toLowerCase()
+            if ((el.href && el.href.includes('nmm=1')) || t.includes('manager') || t.includes('vortex')) {
+              hasManagerLink = true
+              break
+            }
+          }
+
+          if (hasManagerLink) break
+          searchArea = searchArea.parentElement // move up one level and check again
+        }
+
+        if (hasManagerLink) {
+          link.dataset.nnwppForcedNmm = 'true' // to skip re checking
+          continue
+        }
+
+        link.dataset.nnwppForcedNmm = 'true'
+        const isLi = link.parentElement && link.parentElement.tagName === 'LI'
+        const nodeToClone = isLi ? link.parentElement : link
+        const clone = nodeToClone.cloneNode(true)
+        const managerLink = isLi ? clone.querySelector('a') : clone
+
+        if (managerLink.href.includes('file_id=')) {
+          try {
+            const nmmUrl = new URL(managerLink.href, location.origin)
+            nmmUrl.searchParams.set('nmm', '1')
+            managerLink.href = nmmUrl.toString()
+          } catch {
+            managerLink.href += (managerLink.href.includes('?') ? '&' : '?') + 'nmm=1'
+          }
+        }
+
+        const label = managerLink.querySelector('.flex-label') || managerLink
+        label.textContent = text.includes('download') ? '(NNW++) Mod manager download' : '(NNW++) Mod manager'
+        nodeToClone.parentNode.insertBefore(clone, nodeToClone)
+      }
+    }
+
+    injectManagerButtons()
+    forceNmmObserver = new MutationObserver(injectManagerButtons)
+    forceNmmObserver.observe(document.body, { childList: true, subtree: true })
   }
 
   function main() {
@@ -461,6 +564,7 @@
     autoStartDownload()
     upsellBlocker()
     archivedFileHandler()
+    forceModManagerHandler()
 
     if (slowDownloadObserver) {
       slowDownloadObserver.disconnect()
@@ -476,10 +580,9 @@
             slowDownloadBtn.addEventListener('click', async event => {
               event.preventDefault()
               event.stopImmediatePropagation()
-              const params = new URLSearchParams(location.search)
-              const fid = params.get('file_id')
+              const fid = new URLSearchParams(location.search).get('file_id')
               if (!fid) return
-              const isNMM = params.has('nmm') || params.get('nmm') === '1'
+              const isNMM = location.search.includes('nmm=1') || location.search.includes('&nmm')
               logEvent('debug', 'download:slow-intercept', { fileId: fid, isNMM })
               await startDownloadFlow({ btn: slowDownloadBtn, fileId: fid, isNMM, href: location.href })
             })
@@ -505,6 +608,7 @@
       { key: 'RequestTimeout', label: 'Request Timeout', type: 'number', description: 'Maximum time to wait for server responses before timing out (in milliseconds)' },
       { key: 'CloseTabDelay', label: 'Auto-Close Tab Delay', type: 'number', description: 'Delay before automatically closing the tab after download starts (in milliseconds)', showIf: () => cfg.AutoCloseTab },
       { key: 'ErrorSoundUrl', label: 'Error Sound URL', type: 'text', description: 'URL of the custom sound file to play for error alerts', showIf: () => cfg.PlayErrorSound },
+      { key: 'ForceModManagerDownload', label: 'Generate mod manager download buttons for manual-only downloads', type: 'bool', description: "Inject mod-manager download buttons on files that don't have any." },
       { key: 'HandleArchivedFiles', label: 'Generate download buttons for Archived Files', type: 'bool', description: 'Enable handling of archived files.' }
     ]
     const STYLES = {
@@ -527,7 +631,10 @@
     function save() {
       try {
         GM_setValue(CONFIG_KEY, JSON.stringify(cfg))
-      } catch {}
+        logEvent('debug', 'config:saved')
+      } catch (e) {
+        Logger.error('Failed to save config:', e)
+      }
     }
 
     let activeModal = null
@@ -551,7 +658,7 @@
 
       const backdrop = document.createElement('div')
       backdrop.style.cssText = STYLES.backdrop
-      backdrop.addEventListener('click', closeModal)
+      backdrop.onclick = closeModal
       document.body.appendChild(backdrop)
       activeBackdrop = backdrop
 
@@ -583,6 +690,7 @@
         <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Features</h4>${features}</div>
         <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Timing</h4>${timing}</div>
         <div style="display:flex;justify-content:center;gap:10px;margin-top:20px;"><button id="resetSettings" style="${STYLES.btnObj.secondary}">Reset Settings</button><button id="closeSettings" style="${STYLES.btnObj.primary}">Save & Close</button></div>
+        <div style="text-align:center;margin-top:10px;color:#888;font-size:11px;">Some changed settings may require a page reload to take effect.</div>
         <div style="text-align:center;margin-top:12px;color:#666;font-size:12px;">v${GM_info.script.version} by Torkelicious</div>
         <div style="text-align:center;margin-top:6px;color:#666;font-size:10px;"><a href="https://github.com/torkelicious/nexus-no-wait-pp/" target="_blank" style="color:#666;">This software is open-source and licensed under the GPLv3</a></div>
       `
