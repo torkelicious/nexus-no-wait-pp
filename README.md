@@ -34,7 +34,7 @@ A userscript for Nexus Mods that skips countdowns, bypasses redirects, auto-down
 - **Hide premium upsells and annoyances**  
   Optionally hides premium banners and other annoyances (experimental).
 - **UI for configuration**  
-  Click the ⚙️ button in the bottom-right corner to open the settings.
+  Click the "Settings" button under the script in your UserScript manager.
 
 ---
 
@@ -46,7 +46,7 @@ No bans have been reported, but use caution and avoid excessive automated downlo
 
 ---
 
-Originally Based on [StrangeT's Nexus No Wait](https://greasyfork.org/en/scripts/394039-nexus-no-wait)
+Originally Based on [StrangeT's Nexus No Wait](https://greasyfork.org/en/scripts/394039-nexus-no-wait) (seems to be deleted now?)
 
 ---
 
