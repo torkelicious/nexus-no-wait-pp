@@ -203,7 +203,7 @@
         }
       }
 
-      return { url: null, error: 'No NMM download link found (flow changed?)' }
+      return { url: null, error: 'No NMM download link found \n(are you logged in?)' }
     }
 
     if (fileId) {
@@ -239,7 +239,7 @@
       }
     }
 
-    return { url: null, error: 'Could not resolve file link' }
+    return { url: null, error: 'Could not resolve file link \n(are you logged in?)' }
   }
 
   async function normalizeDownloadUrl(url, isNMM) {
