@@ -10,7 +10,6 @@ Install using your preferred userscript manager (such as Violentmonkey or Tamper
 ---
 
 # Nexus No Wait ++
-
 A userscript for Nexus Mods that skips countdowns, bypasses redirects, auto-downloads files, and other extra features
 
 ---
@@ -22,32 +21,29 @@ A userscript for Nexus Mods that skips countdowns, bypasses redirects, auto-down
 - **Supports all games and mod managers**  
   Works with Manual, Vortex, MO2, NMM, nxm links.
 - **Auto-start downloads for `file_id=` URLs**  
-  Optionally Automatically triggers downloads for direct file links (great for modlists etc).
+  Optionally automatically triggers downloads for direct file links (great for modlists etc).
 - **Auto-close tab after download starts**  
   Optionally closes the tab a few seconds after the download begins.
 - **Download buttons for archived files**  
   Adds working download buttons to archived file listings.
 - **Error notifications**  
-  Optionally Alerts you with a popup and/or sound if a download fails.
+  Optionally alerts you with a popup and/or sound if a download fails.
 - **Skip requirements popups/tabs**  
   Optionally bypasses mod requirements dialogs and tabs.
+- **Force-add Mod Manager buttons to manual-only files**  
+  Optionally adds a mod manager download button to mods that don't have one.
 - **Hide premium upsells and annoyances**  
   Optionally hides premium banners and other annoyances (experimental).
 - **UI for configuration**  
-  Click the ⚙️ button in the bottom-right corner to open the settings.
+  Click the "Settings" button under the script in your userscript manager.
 
 ---
 
-⚠ **This script may violate Nexus Mods' Terms of Service. Use at your own risk.**
-
-<sup>
-No bans have been reported, but use caution and avoid excessive automated downloads to avoid getting rate-limited.
-<sup>
+ ⚠ **This script may violate Nexus Mods' Terms of Service. Use at your own risk.**  
+ No bans have been reported, but use caution and avoid excessive automated downloads to avoid getting rate-limited.
 
 ---
 
-Originally Based on [StrangeT's Nexus No Wait](https://greasyfork.org/en/scripts/394039-nexus-no-wait)
-
----
+Originally based on [StrangeT's Nexus No Wait](https://greasyfork.org/en/scripts/394039-nexus-no-wait) (seems to be deleted now?)
 
 [GitHub repository](https://github.com/torkelicious/nexus-no-wait-pp/tree/main)
