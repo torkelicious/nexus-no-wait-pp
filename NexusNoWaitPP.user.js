@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.1.6
+// @version     2.1.7
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -16,6 +16,7 @@
 // @grant       GM_info
 // @grant       GM_addStyle
 // @grant       GM_registerMenuCommand
+// @grant       GM_download
 // @connect     *.nexusmods.com
 // @connect     raw.githubusercontent.com
 // ==/UserScript==
@@ -33,6 +34,7 @@
     ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/errorsound.mp3',
     HandleArchivedFiles: true,
     HidePremiumUpsells: false,
+    OverrideFileNames: false,
     ForceModManagerDownload: false,
     CloseTabDelay: 2000,
     RequestTimeout: 30000
@@ -264,6 +266,21 @@
     return url
   }
 
+  function getFilenameFromHead(headerStr) {
+    if (!headerStr) return null
+
+    if (typeof headerStr === 'object') {
+      headerStr = headerStr['content-disposition'] || headerStr['Content-Disposition'] || ''
+    }
+    if (typeof headerStr !== 'string') return null
+
+    const match = headerStr.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i)
+    if (match && match[1]) {
+      return match[1].replace(/['"]/g, '').trim()
+    }
+    return null
+  }
+
   async function startDownloadFlow({ btn, fileId, isNMM, href, isAutoStart = false }) {
     if (btn) setButtonState(btn, 'waiting')
     logEvent('debug', isAutoStart ? 'download:auto-start' : 'download:start', { fileId, isNMM, href })
@@ -282,6 +299,68 @@
     if (!finalUrl) return handleError(btn || null, 'Failed to resolve download URL')
 
     logEvent('info', 'download:resolved', { url: finalUrl })
+
+    if (cfg.OverrideFileNames && typeof GM_download === 'function' && !isNMM) {
+      const modIdMatch = location.pathname.match(/\/mods\/(\d+)/)
+      const modId = modIdMatch ? modIdMatch[1] : null
+
+      if (modId) {
+        let originalName = finalUrl.split('/').pop().split('?')[0]
+        originalName = decodeURIComponent(originalName) || 'nexus_download'
+
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(originalName)
+        let extIndex = originalName.lastIndexOf('.')
+
+        if (isUUID || extIndex === -1) {
+          logEvent('info', 'download: URL hides filename, fetching headers')
+          try {
+            const headRes = await gmRequest(finalUrl, { method: 'HEAD' })
+            const realName = getFilenameFromHead(headRes.headers)
+            if (realName) {
+              originalName = realName
+              extIndex = originalName.lastIndexOf('.')
+            } else {
+              logEvent('warn', 'download: Could not get real filename from server, fallback', { url: finalUrl })
+              location.assign(finalUrl)
+              return
+            }
+          } catch (err) {
+            logEvent('error', 'download: Header fetch failed, fallback', err)
+            location.assign(finalUrl)
+            return
+          }
+        }
+        let newName = originalName
+
+        const idRegex = new RegExp(`(^|[^0-9])${modId}([^0-9]|$)`)
+        const alreadyHasId = idRegex.test(originalName)
+
+        // if name found & doesn't already have id, append id
+        if (!alreadyHasId) {
+          if (extIndex !== -1) {
+            newName = `${originalName.substring(0, extIndex)}-${modId}${originalName.substring(extIndex)}`
+          } else {
+            logEvent('info', 'download: filename has no extension, appending ID to end')
+            newName = `${originalName}-${modId}`
+          }
+        }
+
+        logEvent('info', 'download: overriding file-name', { originalName, newName })
+
+        GM_download({
+          url: finalUrl,
+          name: newName,
+          saveAs: false,
+          onload: () => logEvent('debug', 'download: override name success'),
+          onerror: err => {
+            logEvent('warn', 'download: override name failed, fallback', err)
+            location.assign(finalUrl)
+          }
+        })
+        return
+      }
+    }
+    // standard non-name override dl
     location.assign(finalUrl)
   }
 
@@ -606,6 +685,7 @@
       { key: 'ShowAlertsOnError', label: 'Show Alert Messages on Errors', type: 'bool', description: 'Display error messages as browser popup alerts' },
       { key: 'PlayErrorSound', label: 'Play Error Sound', type: 'bool', description: 'Play an error sound when download errors occur' },
       { key: 'HidePremiumUpsells', label: 'Hide Premium Upsells & misc Annoyances (experimental)', type: 'bool', description: 'Hide premium upgrade banners, trial offers, and other annoyances on the site (experimental). You are probably better off using an adblocker.' },
+      { key: 'OverrideFileNames', label: 'Append Mod ID to Filenames (Manual Downloads)', type: 'bool', description: 'Restores the Mod ID to downloaded files. Note: Your browser may prompt you for download permissions the first time, and it may take longer to initate downloads.' },
       { key: 'RequestTimeout', label: 'Request Timeout', type: 'number', description: 'Maximum time to wait for server responses before timing out (in milliseconds)' },
       { key: 'CloseTabDelay', label: 'Auto-Close Tab Delay', type: 'number', description: 'Delay before automatically closing the tab after download starts (in milliseconds)', showIf: () => cfg.AutoCloseTab },
       { key: 'ErrorSoundUrl', label: 'Error Sound URL', type: 'text', description: 'URL of the custom sound file to play for error alerts', showIf: () => cfg.PlayErrorSound },
@@ -740,24 +820,6 @@
       activeModal = modal
       document.addEventListener('keydown', onSettingsKeyDown)
     }
-
-    /*
-    if (!document.getElementById('nnwpp-btn')) {
-      const btn = document.createElement('div')
-      btn.id = 'nnwpp-btn'
-      btn.textContent = 'NexusNoWait++ ⚙️'
-      btn.style.cssText = STYLES.btn
-      btn.onclick = showSettingsModal
-      btn.onmouseover = () => (btn.style.transform = 'translateY(-2px)')
-      btn.onmouseout = () => (btn.style.transform = 'none')
-      document.body.appendChild(btn)
-      const observer = new MutationObserver(() => {
-        if (!document.getElementById('nnwpp-btn')) document.body.appendChild(btn)
-      })
-      observer.observe(document.body, { childList: true, subtree: true })
-    }
-    */
-
     GM_registerMenuCommand('Settings', showSettingsModal)
   }
 
