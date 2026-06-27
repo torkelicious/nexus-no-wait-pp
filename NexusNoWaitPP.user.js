@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.1.7
+// @version     2.1.8
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -18,6 +18,7 @@
 // @grant       GM_registerMenuCommand
 // @grant       GM_download
 // @connect     *.nexusmods.com
+// @connect     *.nexus-cdn.com
 // @connect     raw.githubusercontent.com
 // ==/UserScript==
 
