@@ -32,6 +32,8 @@ A userscript for Nexus Mods that skips countdowns, bypasses redirects, auto-down
   Optionally bypasses mod requirements dialogs and tabs.
 - **Force-add Mod Manager buttons to manual-only files**  
   Optionally adds a mod manager download button to mods that don't have one.
+- **Restore Mod ID to downloaded filenames**  
+  Optionally appends the Mod ID back onto filenames (reversing recent changes) for easier manual organization.
 - **Hide premium upsells and annoyances**  
   Optionally hides premium banners and other annoyances (experimental).
 - **UI for configuration**  
