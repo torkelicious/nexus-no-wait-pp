@@ -18,6 +18,7 @@
 // @grant       GM_registerMenuCommand
 // @grant       GM_download
 // @connect     *.nexusmods.com
+// @connect     files.nexus-cdn.com
 // @connect     *.nexus-cdn.com
 // @connect     raw.githubusercontent.com
 // ==/UserScript==
