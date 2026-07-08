@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.1.8
+// @version     2.1.9
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -409,7 +409,7 @@
 
         if (cfg.SkipRequirements && event.composedPath) {
           const path = event.composedPath()
-          const modal = path.find(n => n && n.tagName === 'DOWNLOAD-MODAL')
+          const modal = path.find(n => n && (n.tagName === 'MOD-DOWNLOAD-MODAL' || n.tagName === 'DOWNLOAD-MODAL'))
           if (modal) {
             const btn = path.find(n => n && (n.tagName === 'BUTTON' || n.tagName === 'A'))
             if (btn) {
@@ -418,17 +418,26 @@
               const btnText = btn.textContent ? btn.textContent.toLowerCase() : ''
               const isNMM = btnText.includes('manager') || btnText.includes('vortex') || (btn.href && btn.href.includes('nmm=1'))
               let dlUrl = btn.href || btn.getAttribute('href')
-              const linksStr = modal.getAttribute('download-links')
-              if (linksStr) {
+
+              // extract the token URL from the new file JSON attribute
+              const dataStr = modal.getAttribute('file') || modal.getAttribute('download-links')
+              if (dataStr) {
                 try {
-                  const links = JSON.parse(linksStr)
-                  dlUrl = isNMM ? links.vortexDownloadUrl || links.downloadUrl : links.downloadUrl
+                  const parsedData = JSON.parse(dataStr)
+                  dlUrl = isNMM ? parsedData.vortexDownloadUrl || parsedData.downloadUrl : parsedData.downloadUrl
                 } catch {
                   /* empty */
                 }
               }
+
               if (dlUrl) {
                 logEvent('info', 'requirements:skipped', { isNMM, url: dlUrl })
+
+                // hide the modal instantly to prevent UI locking
+                if (modal.style) modal.style.setProperty('display', 'none', 'important')
+                const closeBtn = modal.shadowRoot ? modal.shadowRoot.querySelector('.nxm-modal-close-button, button[aria-label="Close"]') : modal.querySelector('.nxm-modal-close-button, button[aria-label="Close"]')
+                if (closeBtn) closeBtn.click()
+
                 return startDownloadFlow({ btn, fileId: null, isNMM, href: dlUrl })
               }
             }
