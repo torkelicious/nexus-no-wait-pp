@@ -34,7 +34,7 @@
         SkipRequirements: true,
         ShowAlertsOnError: true,
         PlayErrorSound: true,
-        ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/errorsound.mp3',
+        ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/cf4fdca1cde74a173ac115e95eb1c8ffeb19a4ae/errorsound.mp3',
         HandleArchivedFiles: true,
         HidePremiumUpsells: false,
         OverrideFileNames: false,
