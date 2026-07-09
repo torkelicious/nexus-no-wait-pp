@@ -1,11 +1,12 @@
 {
+  "printWidth": 440,
+  "objectWrap": "collapse",
   "semi": false,
   "singleQuote": true,
   "trailingComma": "none",
-  "tabWidth": 2,
-  "useTabs": false,
-  "printWidth": 440,
-  "bracketSpacing": true,
   "arrowParens": "avoid",
+  "bracketSpacing": true,
+  "tabWidth": 4,
+  "useTabs": false,
   "quoteProps": "as-needed"
 }
