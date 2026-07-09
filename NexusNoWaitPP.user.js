@@ -28,6 +28,7 @@
 
     // config / state
     const CONFIG_KEY = 'NexusNoWaitPP'
+    const AUDIO_CACHE_KEY = 'NexusNoWaitPP_ErrorSoundCache'
     const DEFAULTS = {
         AutoStartDownload: true,
         AutoCloseTab: true,
@@ -84,11 +85,14 @@
     let listenersAttached = false
     let errorAudioPlayer = null
     let stylesInjected = false
+    let domObserver = null
+    let domUpdateTimeout = null
 
-    // network utils
+    // network setup
     const gmXmlHttpRequest = typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest.bind(GM) : typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : null
     if (!gmXmlHttpRequest) Logger.error('No GM XHR API available. Script may not function correctly.')
 
+    // network utils
     function gmRequest(url, opts = {}) {
         return new Promise(resolve => {
             if (!gmXmlHttpRequest) return resolve({ text: '', finalUrl: '', headers: '' })
@@ -117,9 +121,81 @@
         })
     }
 
+    // audio setup
+    function initAudioPlayer(src) {
+        errorAudioPlayer = new Audio(src)
+        errorAudioPlayer.preload = 'auto'
+        errorAudioPlayer.load()
+    }
+
+    function fetchAndCacheAudio(url) {
+        return new Promise(resolve => {
+            if (!gmXmlHttpRequest) return resolve(null)
+            gmXmlHttpRequest({
+                method: 'GET',
+                url: url,
+                responseType: 'blob', // request binary data
+                onload: res => {
+                    if (res.status >= 200 && res.status < 300 && res.response) {
+                        const reader = new FileReader()
+                        reader.onloadend = () => resolve(reader.result) // Base64 Data URI
+                        reader.onerror = () => resolve(null)
+                        reader.readAsDataURL(res.response)
+                    } else {
+                        resolve(null)
+                    }
+                },
+                onerror: () => resolve(null),
+                ontimeout: () => resolve(null)
+            })
+        })
+    }
+
+    async function setupAudio() {
+        if (!cfg.PlayErrorSound || !cfg.ErrorSoundUrl || errorAudioPlayer) return
+        const cachedSound = typeof GM_getValue === 'function' ? GM_getValue(AUDIO_CACHE_KEY, null) : null
+        if (cachedSound) {
+            logEvent('debug', 'audio:loaded-from-cache')
+            initAudioPlayer(cachedSound)
+        } else {
+            // fetch encode and store
+            logEvent('debug', 'audio:fetching-from-network')
+            const b64DataURI = await fetchAndCacheAudio(cfg.ErrorSoundUrl)
+
+            if (b64DataURI) {
+                if (typeof GM_setValue === 'function') {
+                    GM_setValue(AUDIO_CACHE_KEY, b64DataURI)
+                    logEvent('debug', 'audio:saved-to-cache')
+                }
+                initAudioPlayer(b64DataURI)
+            } else {
+                logEvent('warn', 'audio:fetch-failed-using-fallback')
+                initAudioPlayer(cfg.ErrorSoundUrl)
+            }
+        }
+    }
+
+    function playErrorSound() {
+        if (errorAudioPlayer) {
+            errorAudioPlayer.currentTime = 0
+            errorAudioPlayer.play().catch(e => Logger.warn('Error playing sound:', e))
+        }
+    }
+
     // DOM & parsing utils
+    // escape strings
+    function escapeAttr(str) {
+        return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    }
+    // clean file names
+    function sanitizeFilename(name) {
+        if (!name) return name
+        return String(name).replace(/\\/g, '/').split('/').pop().replace(/^\.+/, '').trim() || 'nexus_download'
+    }
+
     const MOD_PAGE_PATTERN = /\/mods\/\d+/
     const isModPage = () => MOD_PAGE_PATTERN.test(location.pathname)
+
     function isNMMDownload(element, href = '') {
         if (href && (href.startsWith('nxm://') || href.includes('nmm=1') || href.includes('&nmm=1'))) return true
         if (!element) return false
@@ -256,7 +332,7 @@
                 headers: { 'X-Requested-With': 'XMLHttpRequest' }
             })
             link = parseDownloadLink(res.finalUrl) || (res.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i) || [])[1] || parseDownloadLink(res.text)
-            if (!link && /ModRequirementsPopUp/i.test(nmmHref)) {
+            if (!link && /ModRequirementsPopUp|tab=requirements/i.test(nmmHref)) {
                 const reqMatch = res.text.match(/href=["']([^"']*?file_id[^"']*?)["']/i)
                 if (reqMatch) {
                     const res2 = await gmRequest(reqMatch[1])
@@ -393,14 +469,14 @@
             const modIdMatch = location.pathname.match(/\/mods\/(\d+)/)
             const modId = modIdMatch ? modIdMatch[1] : null
             if (modId) {
-                let originalName = decodeURIComponent(finalUrl.split('/').pop().split('?')[0]) || 'nexus_download'
+                let originalName = sanitizeFilename(decodeURIComponent(finalUrl.split('/').pop().split('?')[0])) || 'nexus_download'
                 let extIndex = originalName.lastIndexOf('.')
                 const looksLikeUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(originalName)
                 if (looksLikeUUID || extIndex === -1) {
                     logEvent('info', 'download: URL hides filename, fetching headers')
                     try {
                         const headRes = await gmRequest(finalUrl, { method: 'HEAD' })
-                        const realName = getFilenameFromHead(headRes.headers)
+                        const realName = sanitizeFilename(getFilenameFromHead(headRes.headers))
                         if (realName) {
                             originalName = realName
                             extIndex = originalName.lastIndexOf('.')
@@ -625,20 +701,6 @@
         }
     }
 
-    function setupAudio() {
-        if (!cfg.PlayErrorSound || !cfg.ErrorSoundUrl || errorAudioPlayer) return
-        errorAudioPlayer = new Audio(cfg.ErrorSoundUrl)
-        errorAudioPlayer.preload = 'auto'
-        errorAudioPlayer.load()
-    }
-
-    function playErrorSound() {
-        if (errorAudioPlayer) {
-            errorAudioPlayer.currentTime = 0
-            errorAudioPlayer.play().catch(e => Logger.warn('Error playing sound:', e))
-        }
-    }
-
     function upsellBlocker() {
         if (!cfg.HidePremiumUpsells) return
         if (!stylesInjected) {
@@ -662,7 +724,7 @@
                 const hasArchiveBtn = Array.from(footer.querySelectorAll('a.btn.inline-flex .flex-label')).some(el => el.textContent.trim() === 'File archive')
                 if (!hasArchiveBtn) {
                     logEvent('debug', 'ui:archive-button-restored')
-                    footer.insertAdjacentHTML('beforeend', `<a class="btn inline-flex" data-archived-btn="true" href="${url}&category=archived" style="background:#da8e35;color:#fff;margin-left:8px;"><span class="flex-label">File archive</span></a>`)
+                    footer.insertAdjacentHTML('beforeend', `<a class="btn inline-flex" data-archived-btn="true" href="${escapeAttr(url)}&category=archived" style="background:#da8e35;color:#fff;margin-left:8px;"><span class="flex-label">File archive</span></a>`)
                 }
             }
         }
@@ -675,7 +737,8 @@
             if (!fileId || !box || handledArchive.has(box)) continue
             handledArchive.add(box)
             const safeId = encodeURIComponent(fileId)
-            box.innerHTML = `<a class="btn inline-flex" href="${location.origin}${location.pathname}?tab=files&file_id=${safeId}&nmm=1"><span class="flex-label">Mod manager download</span></a> <a class="btn inline-flex" href="${location.origin}${location.pathname}?tab=files&file_id=${safeId}"><span class="flex-label">Manual download</span></a>`
+            const safeBase = escapeAttr(`${location.origin}${location.pathname}`)
+            box.innerHTML = `<a class="btn inline-flex" href="${safeBase}?tab=files&file_id=${safeId}&nmm=1"><span class="flex-label">Mod manager download</span></a> <a class="btn inline-flex" href="${safeBase}?tab=files&file_id=${safeId}"><span class="flex-label">Manual download</span></a>`
         }
     }
 
@@ -784,15 +847,16 @@
             modal.style.cssText = STYLES.modal
             const build = setting => {
                 const display = !setting.showIf || setting.showIf() ? 'block' : 'none'
+                const desc = escapeAttr(setting.description || '')
                 if (setting.type === 'bool') {
-                    return `<div style="${STYLES.row}display:${display}"><label title="${setting.description || ''}" style="${STYLES.label}cursor:pointer;"><input type="checkbox" data-setting="${setting.key}" ${cfg[setting.key] ? 'checked' : ''}><span>${setting.label}</span></label></div>`
+                    return `<div style="${STYLES.row}display:${display}"><label title="${desc}" style="${STYLES.label}cursor:pointer;"><input type="checkbox" data-setting="${setting.key}" ${cfg[setting.key] ? 'checked' : ''}><span>${setting.label}</span></label></div>`
                 }
                 if (setting.type === 'number') {
                     const step = setting.key === 'CloseTabDelay' ? 100 : 1
-                    return `<div style="${STYLES.row}display:${display}"><label title="${setting.description || ''}" style="${STYLES.label}"><span>${setting.label}:</span><input type="number" value="${cfg[setting.key]}" min="0" step="${step}" data-setting="${setting.key}" style="${STYLES.input}width:120px;"></label></div>`
+                    return `<div style="${STYLES.row}display:${display}"><label title="${desc}" style="${STYLES.label}"><span>${setting.label}:</span><input type="number" value="${escapeAttr(cfg[setting.key])}" min="0" step="${step}" data-setting="${setting.key}" style="${STYLES.input}width:120px;"></label></div>`
                 }
                 if (setting.type === 'text') {
-                    return `<div style="${STYLES.row}display:${display}"><label title="${setting.description || ''}" style="${STYLES.label}flex-direction:column;align-items:stretch;gap:4px;"><span style="font-size:0.9em;color:#aaa;">${setting.label}:</span><input type="text" value="${cfg[setting.key]}" data-setting="${setting.key}" style="${STYLES.input}width:95%;"></label></div>`
+                    return `<div style="${STYLES.row}display:${display}"><label title="${desc}" style="${STYLES.label}flex-direction:column;align-items:stretch;gap:4px;"><span style="font-size:0.9em;color:#aaa;">${setting.label}:</span><input type="text" value="${escapeAttr(cfg[setting.key])}" data-setting="${setting.key}" style="${STYLES.input}width:95%;"></label></div>`
                 }
                 return ''
             }
@@ -857,9 +921,6 @@
     }
 
     // initialization
-    let domObserver = null
-    let domUpdateTimeout = null
-
     function handleDomUpdates() {
         upsellBlocker()
         archivedFileHandler()
