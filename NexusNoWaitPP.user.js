@@ -55,6 +55,13 @@
         }
     }
 
+    function cleanResetConfig() {
+        logEvent('info', 'config:reset-requested')
+        Object.assign(cfg, DEFAULTS)
+        if (typeof GM_setValue === 'function') GM_setValue(CONFIG_KEY, JSON.stringify(cfg))
+        location.reload()
+    }
+
     // logging
     const Logger = (() => {
         const tag = () => `[NexusNoWait++ v${GM_info.script.version}]`
@@ -718,20 +725,33 @@
     // Settings UI
     function SettingsUI() {
         const SETTING_UI = [
-            { key: 'AutoStartDownload', label: 'Auto Start Download on file_id= URLs', type: 'bool' },
-            { key: 'AutoCloseTab', label: 'Auto-Close Tab After AutoStartDownload', type: 'bool', showIf: () => cfg.AutoStartDownload },
-            { key: 'SkipRequirements', label: 'Skip Requirements PopUp/Tab', type: 'bool' },
-            { key: 'ShowAlertsOnError', label: 'Show Alert Messages on Errors', type: 'bool' },
-            { key: 'PlayErrorSound', label: 'Play Error Sound', type: 'bool' },
-            { key: 'HidePremiumUpsells', label: 'Hide Premium Upsells (experimental)', type: 'bool' },
-            { key: 'OverrideFileNames', label: 'Append Mod ID to Filenames (Manual)', type: 'bool' },
-            { key: 'ForceModManagerDownload', label: 'Generate mod manager buttons for manual files', type: 'bool' },
-            { key: 'HandleArchivedFiles', label: 'Generate download buttons for Archived Files', type: 'bool' },
-            { key: 'RequestTimeout', label: 'Request Timeout (ms)', type: 'number' },
-            { key: 'CloseTabDelay', label: 'Auto-Close Tab Delay', type: 'number', showIf: () => cfg.AutoStartDownload && cfg.AutoCloseTab },
-            { key: 'ErrorSoundUrl', label: 'Error Sound URL', type: 'text', showIf: () => cfg.PlayErrorSound }
+            { key: 'AutoStartDownload', label: 'Auto Start Download on file_id= URLs', type: 'bool', description: 'Automatically start downloads when visiting file download pages (URLs containing file_id=)' },
+            { key: 'AutoCloseTab', label: 'Auto-Close Tab After AutoStartDownload', type: 'bool', description: 'Auto-close may be unreliable due to browser permissions.', showIf: () => cfg.AutoStartDownload },
+            { key: 'SkipRequirements', label: 'Skip Requirements PopUp/Tab', type: 'bool', description: 'Skip the requirements popup/page and proceed directly to download' },
+            { key: 'ShowAlertsOnError', label: 'Show Alert Messages on Errors', type: 'bool', description: 'Display error messages as browser popup alerts' },
+            { key: 'PlayErrorSound', label: 'Play Error Sound', type: 'bool', description: 'Play an error sound when download errors occur' },
+            { key: 'HidePremiumUpsells', label: 'Hide Premium Upsells & misc Annoyances (experimental)', type: 'bool', description: 'Hide premium upgrade banners, trial offers, and other annoyances on the site (experimental). You are probably better off using an adblocker.' },
+            { key: 'OverrideFileNames', label: 'Append Mod ID to Filenames (Manual Downloads)', type: 'bool', description: 'Restores the Mod ID to downloaded files. Note: Your browser may prompt you for download permissions the first time, and it may take longer to initate downloads.' },
+            { key: 'ForceModManagerDownload', label: 'Generate mod manager download buttons for manual-only downloads', type: 'bool', description: "Inject mod-manager download buttons on files that don't have any." },
+            { key: 'HandleArchivedFiles', label: 'Generate download buttons for Archived Files', type: 'bool', description: 'Enable handling of archived files.' },
+            { key: 'RequestTimeout', label: 'Request Timeout', type: 'number', description: 'Maximum time to wait for server responses before timing out (in milliseconds)' },
+            { key: 'CloseTabDelay', label: 'Auto-Close Tab Delay', type: 'number', description: 'Delay before automatically closing the tab after download starts (in milliseconds)', showIf: () => cfg.AutoStartDownload && cfg.AutoCloseTab },
+            { key: 'ErrorSoundUrl', label: 'Error Sound URL', type: 'text', description: 'URL of the custom sound file to play for error alerts', showIf: () => cfg.PlayErrorSound }
         ]
-
+        const STYLES = {
+            modal: "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2f2f2f;color:#dadada;padding:25px;border-radius:4px;z-index:2147483647;min-width:300px;max-width:90%;max-height:90vh;overflow-y:auto;font-family:'Inter','Helvetica Neue', Helvetica, Arial, sans-serif;",
+            backdrop: 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.5);z-index:2147483646;',
+            section: 'background:#363636;padding:15px;border-radius:4px;margin-bottom:15px;',
+            sectionHeader: 'color:#da8e35;margin:0 0 10px 0;font-size:16px;font-weight:500;',
+            input: 'background:#2f2f2f;border:1px solid #444;color:#dadada;border-radius:3px;padding:5px;',
+            row: 'margin-bottom:10px;',
+            label: 'display:flex;align-items:center;gap:8px;',
+            btnObj: {
+                primary: 'padding:8px 15px;border:none;background:#da8e35;color:white;border-radius:3px;cursor:pointer;',
+                secondary: 'padding:8px 15px;border:1px solid #da8e35;background:transparent;color:#da8e35;border-radius:3px;cursor:pointer;',
+                closeX: 'position:absolute;top:10px;right:10px;background:transparent;border:none;color:#fff;font-size:18px;cursor:pointer;line-height:1;padding:5px;'
+            }
+        }
         function save() {
             try {
                 GM_setValue(CONFIG_KEY, JSON.stringify(cfg))
@@ -740,10 +760,8 @@
                 Logger.error('Failed to save config:', e)
             }
         }
-
         let activeModal = null
         let activeBackdrop = null
-
         const closeModal = () => {
             activeModal?.remove()
             activeModal = null
@@ -754,44 +772,43 @@
         const onSettingsKeyDown = event => {
             if (event.key === 'Escape') closeModal()
         }
-
         function showSettingsModal() {
             cfg = loadConfig()
             closeModal()
-
             const backdrop = document.createElement('div')
-            backdrop.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.5);z-index:2147483646;'
+            backdrop.style.cssText = STYLES.backdrop
             backdrop.onclick = closeModal
             document.body.appendChild(backdrop)
             activeBackdrop = backdrop
-
             const modal = document.createElement('div')
-            modal.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2f2f2f;color:#dadada;padding:25px;border-radius:4px;z-index:2147483647;min-width:300px;max-width:90%;max-height:90vh;overflow-y:auto;font-family:'Inter', sans-serif;"
-
+            modal.style.cssText = STYLES.modal
             const build = setting => {
                 const display = !setting.showIf || setting.showIf() ? 'block' : 'none'
                 if (setting.type === 'bool') {
-                    return `<div style="margin-bottom:10px;display:${display}"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" data-setting="${setting.key}" ${cfg[setting.key] ? 'checked' : ''}><span>${setting.label}</span></label></div>`
+                    return `<div style="${STYLES.row}display:${display}"><label title="${setting.description || ''}" style="${STYLES.label}cursor:pointer;"><input type="checkbox" data-setting="${setting.key}" ${cfg[setting.key] ? 'checked' : ''}><span>${setting.label}</span></label></div>`
                 }
                 if (setting.type === 'number') {
-                    return `<div style="margin-bottom:10px;display:${display}"><label style="display:flex;align-items:center;gap:8px;"><span>${setting.label}:</span><input type="number" value="${cfg[setting.key]}" data-setting="${setting.key}" style="background:#2f2f2f;border:1px solid #444;color:#dadada;padding:5px;width:80px;"></label></div>`
+                    const step = setting.key === 'CloseTabDelay' ? 100 : 1
+                    return `<div style="${STYLES.row}display:${display}"><label title="${setting.description || ''}" style="${STYLES.label}"><span>${setting.label}:</span><input type="number" value="${cfg[setting.key]}" min="0" step="${step}" data-setting="${setting.key}" style="${STYLES.input}width:120px;"></label></div>`
                 }
                 if (setting.type === 'text') {
-                    return `<div style="margin-bottom:10px;display:${display}"><label style="display:flex;flex-direction:column;gap:4px;"><span style="color:#aaa;">${setting.label}:</span><input type="text" value="${cfg[setting.key]}" data-setting="${setting.key}" style="background:#2f2f2f;border:1px solid #444;color:#dadada;padding:5px;width:100%;"></label></div>`
+                    return `<div style="${STYLES.row}display:${display}"><label title="${setting.description || ''}" style="${STYLES.label}flex-direction:column;align-items:stretch;gap:4px;"><span style="font-size:0.9em;color:#aaa;">${setting.label}:</span><input type="text" value="${cfg[setting.key]}" data-setting="${setting.key}" style="${STYLES.input}width:95%;"></label></div>`
                 }
                 return ''
             }
+            const features = SETTING_UI.filter(u => u.type === 'bool' || u.type === 'text')
+                .map(build)
+                .join('')
+            const timing = SETTING_UI.filter(u => u.type === 'number')
+                .map(build)
+                .join('')
 
-            modal.innerHTML = `
-        <button id="closeSettingsX" style="position:absolute;top:10px;right:10px;background:transparent;border:none;color:#fff;font-size:18px;cursor:pointer;">×</button>
-        <h3 style="color:#da8e35;margin-top:0;">NexusNoWait++ Settings</h3>
-        <div style="background:#363636;padding:15px;border-radius:4px;margin-bottom:15px;">${SETTING_UI.filter(u => u.type !== 'number')
-            .map(build)
-            .join('')}</div>
-        <div style="background:#363636;padding:15px;border-radius:4px;">${SETTING_UI.filter(u => u.type === 'number')
-            .map(build)
-            .join('')}</div>
-        <div style="display:flex;justify-content:center;gap:10px;margin-top:20px;"><button id="resetSettings" style="padding:8px 15px;border:1px solid #da8e35;background:transparent;color:#da8e35;cursor:pointer;">Reset Defaults</button><button id="closeSettings" style="padding:8px 15px;border:none;background:#da8e35;color:white;cursor:pointer;">Save & Close</button></div>
+            modal.innerHTML = `<style>a:hover { text-decoration: underline !important; }</style>
+        <button id="closeSettingsX" style="${STYLES.btnObj.closeX}">×</button>
+        <h3 style="${STYLES.sectionHeader}margin-top:0;">NexusNoWait++ Settings</h3>
+        <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Features</h4>${features}</div>
+        <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Timing</h4>${timing}</div>
+        <div style="display:flex;justify-content:center;gap:10px;margin-top:20px;"><button id="resetSettings" style="${STYLES.btnObj.secondary}">Reset Settings</button><button id="closeSettings" style="${STYLES.btnObj.primary}">Save & Close</button></div>
         <div style="text-align:center;margin-top:10px;color:#888;font-size:11px;">Some changed settings may require a page reload to take effect.</div>
         <div style="text-align:center;margin-top:12px;color:#666;font-size:12px;">v${GM_info.script.version} by Torkelicious</div>
         <div style="text-align:center;margin-top:6px;color:#666;font-size:10px;"><a href="https://github.com/torkelicious/nexus-no-wait-pp/" target="_blank" style="color:#666;">This software is open-source and licensed under the GPLv3</a></div>`
@@ -806,6 +823,7 @@
 
             const update = element => {
                 const key = element.getAttribute('data-setting')
+                if (!key) return
                 let value = element.type === 'checkbox' ? element.checked : element.type === 'number' ? parseInt(element.value, 10) : element.value
                 if (typeof value === 'number' && isNaN(value)) {
                     element.value = cfg[key]
@@ -827,10 +845,8 @@
             modal.querySelector('#closeSettingsX').addEventListener('click', closeModal)
             modal.querySelector('#closeSettings').addEventListener('click', closeModal)
             modal.querySelector('#resetSettings').addEventListener('click', () => {
-                logEvent('info', 'config:reset-requested')
-                cfg = { ...DEFAULTS }
-                save()
-                location.reload()
+                cleanResetConfig()
+                closeModal()
             })
             document.body.appendChild(modal)
             activeModal = modal
