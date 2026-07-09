@@ -43,6 +43,16 @@
         RequestTimeout: 30000
     }
 
+    // logging
+    const Logger = (() => {
+        const tag = () => `[NexusNoWait++ v${GM_info.script.version}]`
+        return ['debug', 'info', 'warn', 'error'].reduce((o, lvl) => {
+            o[lvl] = (...a) => console[lvl](tag(), ...a)
+            return o
+        }, {})
+    })()
+    const logEvent = (level, event, data = {}) => Logger[level](event, data)
+
     function loadConfig() {
         try {
             const raw = typeof GM_getValue === 'function' ? GM_getValue(CONFIG_KEY, null) : null
@@ -66,16 +76,6 @@
     let listenersAttached = false
     let errorAudioPlayer = null
     let stylesInjected = false
-
-    // logging
-    const Logger = (() => {
-        const tag = () => `[NexusNoWait++ v${GM_info.script.version}]`
-        return ['debug', 'info', 'warn', 'error'].reduce((o, lvl) => {
-            o[lvl] = (...a) => console[lvl](tag(), ...a)
-            return o
-        }, {})
-    })()
-    const logEvent = (level, event, data = {}) => Logger[level](event, data)
 
     // network utils
     const gmXmlHttpRequest = typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest.bind(GM) : typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : null
@@ -374,14 +374,7 @@
         }
 
         // prevent redirects
-        if (
-            cfg.SkipRequirements &&
-            !finalUrl.startsWith('nxm://') &&
-            finalUrl.includes('nexusmods.com') &&
-            (finalUrl.includes('file_id=') || /\/files\/\d+/i.test(finalUrl)) &&
-            !finalUrl.includes('GenerateDownloadUrl') &&
-            !finalUrl.includes('nexus-cdn.com')
-        ) {
+        if (cfg.SkipRequirements && !finalUrl.startsWith('nxm://') && finalUrl.includes('nexusmods.com') && (finalUrl.includes('file_id=') || /\/files\/\d+/i.test(finalUrl)) && !finalUrl.includes('GenerateDownloadUrl') && !finalUrl.includes('nexus-cdn.com')) {
             const deepLink = await scrapeDeepDownloadLink(finalUrl, isNMM)
             if (deepLink) {
                 if (deepLink.includes('/api/files/') || deepLink.includes('GenerateDownloadUrl')) {
@@ -657,19 +650,7 @@
         if (!cfg.HidePremiumUpsells) return
         if (!stylesInjected) {
             logEvent('debug', 'ui:upsell-blocker-active')
-            const selectors = [
-                '#nonPremiumBanner',
-                '#freeTrialBanner',
-                '#ig-banner-container',
-                '#rj-vortex',
-                '[class*="ads-bottom"]',
-                '[class*="ads-top"]',
-                '[class*="to-premium"]',
-                '[class*="from-premium"]',
-                '[class*="premium"]',
-                '#mainContent > div.ads-holder',
-                '#head > div.rj-right-tray.rj-profile-tray.rj-open > ul > li.user-profile-menu-section-top > a'
-            ]
+            const selectors = ['#nonPremiumBanner', '#freeTrialBanner', '#ig-banner-container', '#rj-vortex', '[class*="ads-bottom"]', '[class*="ads-top"]', '[class*="to-premium"]', '[class*="from-premium"]', '[class*="premium"]', '#mainContent > div.ads-holder', '#head > div.rj-right-tray.rj-profile-tray.rj-open > ul > li.user-profile-menu-section-top > a']
             GM_addStyle(selectors.map(s => `${s}{display:none!important}`).join('\n'))
             stylesInjected = true
         }
@@ -688,10 +669,7 @@
                 const hasArchiveBtn = Array.from(footer.querySelectorAll('a.btn.inline-flex .flex-label')).some(el => el.textContent.trim() === 'File archive')
                 if (!hasArchiveBtn) {
                     logEvent('debug', 'ui:archive-button-restored')
-                    footer.insertAdjacentHTML(
-                        'beforeend',
-                        `<a class="btn inline-flex" data-archived-btn="true" href="${url}&category=archived" style="background:#da8e35;color:#fff;margin-left:8px;"><span class="flex-label">File archive</span></a>`
-                    )
+                    footer.insertAdjacentHTML('beforeend', `<a class="btn inline-flex" data-archived-btn="true" href="${url}&category=archived" style="background:#da8e35;color:#fff;margin-left:8px;"><span class="flex-label">File archive</span></a>`)
                 }
             }
         }
@@ -806,8 +784,7 @@
             activeBackdrop = backdrop
 
             const modal = document.createElement('div')
-            modal.style.cssText =
-                "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2f2f2f;color:#dadada;padding:25px;border-radius:4px;z-index:2147483647;min-width:300px;max-width:90%;max-height:90vh;overflow-y:auto;font-family:'Inter', sans-serif;"
+            modal.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2f2f2f;color:#dadada;padding:25px;border-radius:4px;z-index:2147483647;min-width:300px;max-width:90%;max-height:90vh;overflow-y:auto;font-family:'Inter', sans-serif;"
 
             const build = setting => {
                 const display = !setting.showIf || setting.showIf() ? 'block' : 'none'
