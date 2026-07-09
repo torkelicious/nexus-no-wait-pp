@@ -43,16 +43,6 @@
         RequestTimeout: 30000
     }
 
-    // logging
-    const Logger = (() => {
-        const tag = () => `[NexusNoWait++ v${GM_info.script.version}]`
-        return ['debug', 'info', 'warn', 'error'].reduce((o, lvl) => {
-            o[lvl] = (...a) => console[lvl](tag(), ...a)
-            return o
-        }, {})
-    })()
-    const logEvent = (level, event, data = {}) => Logger[level](event, data)
-
     function loadConfig() {
         try {
             const raw = typeof GM_getValue === 'function' ? GM_getValue(CONFIG_KEY, null) : null
@@ -64,6 +54,17 @@
             return { ...DEFAULTS }
         }
     }
+
+    // logging
+    const Logger = (() => {
+        const tag = () => `[NexusNoWait++ v${GM_info.script.version}]`
+        return ['debug', 'info', 'warn', 'error'].reduce((o, lvl) => {
+            o[lvl] = (...a) => console[lvl](tag(), ...a)
+            return o
+        }, {})
+    })()
+    const logEvent = (level, event, data = {}) => Logger[level](event, data)
+
     let cfg = loadConfig()
 
     // prevent duplicate actions
@@ -112,7 +113,6 @@
     // DOM & parsing utils
     const MOD_PAGE_PATTERN = /\/mods\/\d+/
     const isModPage = () => MOD_PAGE_PATTERN.test(location.pathname)
-
     function isNMMDownload(element, href = '') {
         if (href && (href.startsWith('nxm://') || href.includes('nmm=1') || href.includes('&nmm=1'))) return true
         if (!element) return false
@@ -186,7 +186,6 @@
                 hadParseError = true
             }
         }
-
         const depRaw = el.getAttribute('dependencies')
         if (depRaw !== null && depRaw !== undefined) {
             sawAnyAttribute = true
@@ -243,7 +242,6 @@
                 Logger.warn('API fetch failed:', err)
             }
         }
-
         if (isNMM && href) {
             let nmmHref = href
             if (!nmmHref.includes('nmm=1')) nmmHref += (nmmHref.includes('?') ? '&' : '?') + 'nmm=1'
@@ -260,7 +258,6 @@
             }
             if (link) return { url: link }
         }
-
         if (fileId) {
             const endpoint = '/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl'
             const spoofedReferer = `https://www.nexusmods.com${location.pathname}?tab=files&file_id=${fileId}`
@@ -385,7 +382,6 @@
                 }
             }
         }
-
         if (cfg.OverrideFileNames && typeof GM_download === 'function' && !isNMM && !finalUrl.startsWith('nxm://')) {
             const modIdMatch = location.pathname.match(/\/mods\/(\d+)/)
             const modId = modIdMatch ? modIdMatch[1] : null
@@ -506,27 +502,21 @@
                 const { hasRequirements: hasRequirementsAlert, unknown: requirementsUnknown } = detectRequirements([modal, hostContainer])
                 const hasRequirementsHref = href.includes('ModRequirementsPopUp') || href.includes('tab=requirements')
                 const isDownloadLink = fileId || secureApiUrl || isDownloadHref(href) || (modal && (isNMM || (element.textContent || '').toLowerCase().includes('manual')))
-
                 if (!isDownloadLink) return
-
                 if ((hasRequirementsAlert || hasRequirementsHref) && !cfg.SkipRequirements) {
                     secureApiUrl = null
                     logEvent('info', 'Yielding to native UI: File has requirements & SkipRequirements is false')
                     return
                 }
-
                 if (requirementsUnknown && !cfg.SkipRequirements) {
                     logEvent('warn', 'Yielding to native UI: could not confirm requirements state & SkipRequirements is false')
                     return
                 }
-
                 if (processing.has(element)) return
                 if ((element.textContent || '').toLowerCase().includes('slow download')) return
-
                 processing.add(element)
                 event.preventDefault()
                 event.stopImmediatePropagation()
-
                 try {
                     const finalHref = secureApiUrl || href || `https://www.nexusmods.com${location.pathname}?tab=files&file_id=${fileId}`
                     if ((hasRequirementsAlert || hasRequirementsHref) && cfg.SkipRequirements) {
@@ -571,13 +561,10 @@
         if (!cfg.AutoStartDownload || !isModPage()) return
         if (location.search.includes('tab=files') && !location.pathname.includes('/files/')) return
         if (document.querySelector('mod-file-download')) return
-
         const fileId = new URLSearchParams(location.search).get('file_id')
         if (!fileId || autoFiredIds.has(fileId)) return
-
         autoFiredIds.add(fileId)
         const isNMM = isNMMDownload(null, location.search)
-
         await new Promise(r => setTimeout(r, 200))
         await startDownloadFlow({
             fileId,
@@ -595,7 +582,6 @@
         if (!location.search.includes('file_id')) return
         const slowBtn = document.querySelector('mod-file-download')?.shadowRoot?.querySelector('button')
         if (!slowBtn || !(slowBtn.textContent || '').toLowerCase().includes('slow download') || attachedSlowDl.has(slowBtn)) return
-
         attachedSlowDl.add(slowBtn)
         slowBtn.addEventListener('click', async event => {
             event.preventDefault()
@@ -674,7 +660,6 @@
             }
         }
         if (!url.includes('category=archived')) return
-
         const headers = document.getElementsByClassName('file-expander-header')
         const downloads = document.getElementsByClassName('accordion-downloads')
         for (let i = 0; i < headers.length; i++) {
@@ -709,15 +694,12 @@
                 if (hasManagerLink) break
                 searchArea = searchArea.parentElement
             }
-
             handledForceNmm.add(link)
             if (hasManagerLink) continue
-
             const isLi = link.parentElement && link.parentElement.tagName === 'LI'
             const nodeToClone = isLi ? link.parentElement : link
             const clone = nodeToClone.cloneNode(true)
             const managerLink = isLi ? clone.querySelector('a') : clone
-
             if (managerLink.href && managerLink.href.includes('file_id=')) {
                 try {
                     const nmmUrl = new URL(managerLink.href, location.origin)
@@ -810,8 +792,9 @@
             .map(build)
             .join('')}</div>
         <div style="display:flex;justify-content:center;gap:10px;margin-top:20px;"><button id="resetSettings" style="padding:8px 15px;border:1px solid #da8e35;background:transparent;color:#da8e35;cursor:pointer;">Reset Defaults</button><button id="closeSettings" style="padding:8px 15px;border:none;background:#da8e35;color:white;cursor:pointer;">Save & Close</button></div>
-        <div style="text-align:center;margin-top:12px;color:#666;font-size:12px;">v${GM_info.script.version}</div>
-      `
+        <div style="text-align:center;margin-top:10px;color:#888;font-size:11px;">Some changed settings may require a page reload to take effect.</div>
+        <div style="text-align:center;margin-top:12px;color:#666;font-size:12px;">v${GM_info.script.version} by Torkelicious</div>
+        <div style="text-align:center;margin-top:6px;color:#666;font-size:10px;"><a href="https://github.com/torkelicious/nexus-no-wait-pp/" target="_blank" style="color:#666;">This software is open-source and licensed under the GPLv3</a></div>`
 
             const updateVisibility = () => {
                 for (const setting of SETTING_UI) {
@@ -854,7 +837,6 @@
             updateVisibility()
             document.addEventListener('keydown', onSettingsKeyDown)
         }
-
         if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('Settings', showSettingsModal)
     }
 
