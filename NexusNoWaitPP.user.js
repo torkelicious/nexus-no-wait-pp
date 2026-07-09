@@ -29,20 +29,7 @@
     // config / state
     const CONFIG_KEY = 'NexusNoWaitPP'
     const AUDIO_CACHE_KEY = 'NexusNoWaitPP_ErrorSoundCache'
-    const DEFAULTS = {
-        AutoStartDownload: true,
-        AutoCloseTab: true,
-        SkipRequirements: true,
-        ShowAlertsOnError: true,
-        PlayErrorSound: true,
-        ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/cf4fdca1cde74a173ac115e95eb1c8ffeb19a4ae/errorsound.mp3',
-        HandleArchivedFiles: true,
-        HidePremiumUpsells: false,
-        OverrideFileNames: false,
-        ForceModManagerDownload: false,
-        CloseTabDelay: 2000,
-        RequestTimeout: 30000
-    }
+    const DEFAULTS = { AutoStartDownload: true, AutoCloseTab: true, SkipRequirements: true, ShowAlertsOnError: true, PlayErrorSound: true, ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/cf4fdca1cde74a173ac115e95eb1c8ffeb19a4ae/errorsound.mp3', HandleArchivedFiles: true, HidePremiumUpsells: false, OverrideFileNames: false, ForceModManagerDownload: false, CloseTabDelay: 2000, RequestTimeout: 30000 }
 
     function loadConfig() {
         try {
@@ -64,29 +51,25 @@
     }
 
     // logging
-    const Logger = (() => {
-        const tag = () => `[NexusNoWait++ v${GM_info.script.version}]`
-        return ['debug', 'info', 'warn', 'error'].reduce((o, lvl) => {
-            o[lvl] = (...a) => console[lvl](tag(), ...a)
-            return o
-        }, {})
-    })()
+    const Logger = ['debug', 'info', 'warn', 'error'].reduce((o, lvl) => {
+        o[lvl] = (...a) => console[lvl](`[NexusNoWait++ v${GM_info.script.version}]`, ...a)
+        return o
+    }, {})
     const logEvent = (level, event, data = {}) => Logger[level](event, data)
 
     let cfg = loadConfig()
 
-    // prevent duplicate actions
-    const processing = new WeakSet() // click interceptor
-    const handledArchive = new WeakSet() // archived file handler
-    const handledForceNmm = new WeakSet() // force mod manager handler
-    const attachedSlowDl = new WeakSet() // slow download button listener
-    // tracking for auto firing
+    // prevent duplicate actions & state tracking
+    const processing = new WeakSet(),
+        handledArchive = new WeakSet(),
+        handledForceNmm = new WeakSet(),
+        attachedSlowDl = new WeakSet()
     const autoFiredIds = new Set()
-    let listenersAttached = false
-    let errorAudioPlayer = null
-    let stylesInjected = false
-    let domObserver = null
-    let domUpdateTimeout = null
+    let listenersAttached = false,
+        errorAudioPlayer = null,
+        stylesInjected = false,
+        domObserver = null,
+        domUpdateTimeout = null
 
     // network setup
     const gmXmlHttpRequest = typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest.bind(GM) : typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : null
@@ -103,12 +86,7 @@
                 timeout: opts.timeout ?? cfg.RequestTimeout,
                 headers: opts.headers || {},
                 data: opts.data || null,
-                onload: r =>
-                    resolve({
-                        text: r.responseText || '',
-                        finalUrl: r.finalUrl || '',
-                        headers: r.responseHeaders || ''
-                    }),
+                onload: r => resolve({ text: r.responseText || '', finalUrl: r.finalUrl || '', headers: r.responseHeaders || '' }),
                 onerror: e => {
                     logEvent('error', 'network:request-failed', { url, error: e })
                     resolve({ text: '', finalUrl: '', headers: '' })
@@ -128,29 +106,6 @@
         errorAudioPlayer.load()
     }
 
-    function fetchAndCacheAudio(url) {
-        return new Promise(resolve => {
-            if (!gmXmlHttpRequest) return resolve(null)
-            gmXmlHttpRequest({
-                method: 'GET',
-                url: url,
-                responseType: 'blob', // request binary data
-                onload: res => {
-                    if (res.status >= 200 && res.status < 300 && res.response) {
-                        const reader = new FileReader()
-                        reader.onloadend = () => resolve(reader.result) // Base64 Data URI
-                        reader.onerror = () => resolve(null)
-                        reader.readAsDataURL(res.response)
-                    } else {
-                        resolve(null)
-                    }
-                },
-                onerror: () => resolve(null),
-                ontimeout: () => resolve(null)
-            })
-        })
-    }
-
     async function setupAudio() {
         if (!cfg.PlayErrorSound || !cfg.ErrorSoundUrl || errorAudioPlayer) return
         const cachedSound = typeof GM_getValue === 'function' ? GM_getValue(AUDIO_CACHE_KEY, null) : null
@@ -158,10 +113,25 @@
             logEvent('debug', 'audio:loaded-from-cache')
             initAudioPlayer(cachedSound)
         } else {
-            // fetch encode and store
             logEvent('debug', 'audio:fetching-from-network')
-            const b64DataURI = await fetchAndCacheAudio(cfg.ErrorSoundUrl)
-
+            const b64DataURI = await new Promise(resolve => {
+                if (!gmXmlHttpRequest) return resolve(null)
+                gmXmlHttpRequest({
+                    method: 'GET',
+                    url: cfg.ErrorSoundUrl,
+                    responseType: 'blob',
+                    onload: res => {
+                        if (res.status >= 200 && res.status < 300 && res.response) {
+                            const reader = new FileReader()
+                            reader.onloadend = () => resolve(reader.result)
+                            reader.onerror = () => resolve(null)
+                            reader.readAsDataURL(res.response)
+                        } else resolve(null)
+                    },
+                    onerror: () => resolve(null),
+                    ontimeout: () => resolve(null)
+                })
+            })
             if (b64DataURI) {
                 if (typeof GM_setValue === 'function') {
                     GM_setValue(AUDIO_CACHE_KEY, b64DataURI)
@@ -183,18 +153,17 @@
     }
 
     // DOM & parsing utils
-    // escape strings
     function escapeAttr(str) {
         return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     }
-    // clean file names
+
     function sanitizeFilename(name) {
         if (!name) return name
         return String(name).replace(/\\/g, '/').split('/').pop().replace(/^\.+/, '').trim() || 'nexus_download'
     }
 
-    const MOD_PAGE_PATTERN = /\/mods\/\d+/
-    const isModPage = () => MOD_PAGE_PATTERN.test(location.pathname)
+    const appendNmmParam = href => (!href || href.includes('nmm=1') ? href : `${href}${href.includes('?') ? '&' : '?'}nmm=1`)
+    const isModPage = () => /\/mods\/\d+/.test(location.pathname)
 
     function isNMMDownload(element, href = '') {
         if (href && (href.startsWith('nxm://') || href.includes('nmm=1') || href.includes('&nmm=1'))) return true
@@ -256,9 +225,9 @@
     // requirements detection
     function readRequirementsFlag(el) {
         if (!el || typeof el.getAttribute !== 'function') return null
-        let sawAnyAttribute = false
-        let hasEntries = false
-        let hadParseError = false
+        let sawAnyAttribute = false,
+            hasEntries = false,
+            hadParseError = false
         const reqRaw = el.getAttribute('requirements')
         if (reqRaw !== null && reqRaw !== undefined) {
             sawAnyAttribute = true
@@ -274,23 +243,22 @@
             sawAnyAttribute = true
             try {
                 const parsed = JSON.parse(depRaw)
-                if (Array.isArray(parsed)) {
-                    const hasFiles = parsed.some(group => Array.isArray(group?.files) && group.files.length > 0)
-                    if (hasFiles) hasEntries = true
+                if (Array.isArray(parsed) && parsed.some(group => Array.isArray(group?.files) && group.files.length > 0)) {
+                    hasEntries = true
                 }
             } catch (e) {
                 hadParseError = true
             }
         }
-        if (!sawAnyAttribute) return null
+        if (!sawAnyAttribute) return false
         if (hasEntries) return true
         if (hadParseError) return null
         return false
     }
 
     function detectRequirements(elements) {
-        let sawDefinitiveFalse = false
-        let sawAnyCandidate = false
+        let sawDefinitiveFalse = false,
+            sawAnyCandidate = false
         for (const el of elements) {
             if (!el) continue
             sawAnyCandidate = true
@@ -309,8 +277,7 @@
         let link = null
         if (href && href.includes('/api/files/')) {
             logEvent('info', 'download:resolve-api', { href })
-            let targetApiUrl = href
-            if (isNMM && !targetApiUrl.includes('nmm=1')) targetApiUrl += (targetApiUrl.includes('?') ? '&' : '?') + 'nmm=1'
+            let targetApiUrl = isNMM ? appendNmmParam(href) : href
             try {
                 const res = await gmRequest(targetApiUrl, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
                 link = res.finalUrl && res.finalUrl !== targetApiUrl ? res.finalUrl : null
@@ -326,11 +293,8 @@
             }
         }
         if (isNMM && href) {
-            let nmmHref = href
-            if (!nmmHref.includes('nmm=1')) nmmHref += (nmmHref.includes('?') ? '&' : '?') + 'nmm=1'
-            const res = await gmRequest(nmmHref, {
-                headers: { 'X-Requested-With': 'XMLHttpRequest' }
-            })
+            let nmmHref = appendNmmParam(href)
+            const res = await gmRequest(nmmHref, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
             link = parseDownloadLink(res.finalUrl) || (res.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i) || [])[1] || parseDownloadLink(res.text)
             if (!link && /ModRequirementsPopUp|tab=requirements/i.test(nmmHref)) {
                 const reqMatch = res.text.match(/href=["']([^"']*?file_id[^"']*?)["']/i)
@@ -347,24 +311,12 @@
             let postData = `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || '')}`
             if (isNMM) postData += '&nmm=1'
 
-            const res = await gmRequest(endpoint, {
-                method: 'POST',
-                data: postData,
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    Origin: 'https://www.nexusmods.com',
-                    Referer: href || spoofedReferer
-                }
-            })
+            const res = await gmRequest(endpoint, { method: 'POST', data: postData, headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest', Origin: 'https://www.nexusmods.com', Referer: href || spoofedReferer } })
             const extracted = parseDownloadURLFromResponse(res.text)
             if (extracted) link = extracted.url
         }
         if (link) return { url: link }
-        return {
-            url: null,
-            error: 'Could not resolve file link (are you logged in?)'
-        }
+        return { url: null, error: 'Could not resolve file link (are you logged in?)' }
     }
 
     async function normalizeDownloadUrl(url, isNMM) {
@@ -374,12 +326,7 @@
                 const parsed = new URL(url, location.href)
                 const fileId = parsed.searchParams.get('file_id')
                 if (fileId) {
-                    const res = await getDownloadUrl({
-                        fileId,
-                        gameId: getGameId(),
-                        isNMM,
-                        href: url
-                    })
+                    const res = await getDownloadUrl({ fileId, gameId: getGameId(), isNMM, href: url })
                     if (res?.url) return res.url
                 }
             } catch (e) {}
@@ -417,11 +364,7 @@
     function setButtonState(button, state, message) {
         if (!button) return
         const textElement = button.querySelector('span.flex-label, span') || button
-        const stateConfig = {
-            waiting: { text: 'Please Wait...', color: 'orange' },
-            downloading: { text: 'Downloading!', color: 'green' },
-            error: { text: message || 'Error', color: 'red' }
-        }
+        const stateConfig = { waiting: { text: 'Please Wait...', color: 'orange' }, downloading: { text: 'Downloading!', color: 'green' }, error: { text: message || 'Error', color: 'red' } }
         const config = stateConfig[state] || stateConfig.error
         if (textElement) textElement.innerText = config.text
         button.style.color = config.color
@@ -446,7 +389,7 @@
         if (!finalUrl) return handleError(btn || null, 'Failed to resolve download URL')
         logEvent('info', 'download:resolved', { url: finalUrl })
 
-        // safety:  if API returns a Requirements URL and user wants to see requirements then stop
+        // safety: if API returns a Requirements URL and user wants to see requirements then stop
         if (/ModRequirementsPopUp|tab=requirements/i.test(finalUrl) && !cfg.SkipRequirements) {
             logEvent('info', 'Halting flow: File has requirements & SkipRequirements is false', { finalUrl })
             location.assign(finalUrl)
@@ -493,9 +436,8 @@
                 }
                 let newName = extIndex !== -1 ? `${originalName.substring(0, extIndex)}-${modId}${originalName.substring(extIndex)}` : `${originalName}-${modId}`
                 const idRegex = new RegExp(`(^|[^0-9])${modId}([^0-9]|$)`)
-                if (extIndex === -1) {
-                    logEvent('info', 'download: filename has no extension, appending ID to end')
-                }
+                if (extIndex === -1) logEvent('info', 'download: filename has no extension, appending ID to end')
+
                 if (idRegex.test(originalName)) {
                     newName = originalName
                 } else {
@@ -605,12 +547,7 @@
                     if ((hasRequirementsAlert || hasRequirementsHref) && cfg.SkipRequirements) {
                         logEvent('info', 'requirements:skipped', { isNMM, url: finalHref })
                     }
-                    await startDownloadFlow({
-                        btn: element,
-                        fileId: secureApiUrl ? null : fileId,
-                        isNMM,
-                        href: finalHref
-                    })
+                    await startDownloadFlow({ btn: element, fileId: secureApiUrl ? null : fileId, isNMM, href: finalHref })
                 } catch (e) {
                     handleError(element, String(e))
                 } finally {
@@ -649,12 +586,8 @@
         autoFiredIds.add(fileId)
         const isNMM = isNMMDownload(null, location.search)
         await new Promise(r => setTimeout(r, 200))
-        await startDownloadFlow({
-            fileId,
-            isNMM,
-            href: location.href,
-            isAutoStart: true
-        })
+        await startDownloadFlow({ fileId, isNMM, href: location.href, isAutoStart: true })
+
         if (cfg.AutoCloseTab) {
             logEvent('debug', 'tab:closing', { delay: cfg.CloseTabDelay })
             setTimeout(() => window.close(), cfg.CloseTabDelay)
@@ -672,12 +605,7 @@
             const fid = new URLSearchParams(location.search).get('file_id')
             if (fid) {
                 logEvent('debug', 'download:slow-intercept', { fileId: fid, isNMM: isNMMDownload(slowBtn, location.search) })
-                await startDownloadFlow({
-                    btn: slowBtn,
-                    fileId: fid,
-                    isNMM: isNMMDownload(slowBtn, location.search),
-                    href: location.href
-                })
+                await startDownloadFlow({ btn: slowBtn, fileId: fid, isNMM: isNMMDownload(slowBtn, location.search), href: location.href })
             }
         })
 
@@ -685,13 +613,7 @@
             const fid = new URLSearchParams(location.search).get('file_id')
             if (fid && !autoFiredIds.has(fid)) {
                 autoFiredIds.add(fid)
-                startDownloadFlow({
-                    btn: slowBtn,
-                    fileId: fid,
-                    isNMM: isNMMDownload(slowBtn, location.search),
-                    href: location.href,
-                    isAutoStart: true
-                }).then(() => {
+                startDownloadFlow({ btn: slowBtn, fileId: fid, isNMM: isNMMDownload(slowBtn, location.search), href: location.href, isAutoStart: true }).then(() => {
                     if (cfg.AutoCloseTab) {
                         logEvent('debug', 'tab:closing', { delay: cfg.CloseTabDelay })
                         setTimeout(() => window.close(), cfg.CloseTabDelay)
@@ -709,7 +631,6 @@
             GM_addStyle(selectors.map(s => `${s}{display:none!important}`).join('\n'))
             stylesInjected = true
         }
-
         document.querySelector('.bg-nexus-premium-gradient')?.remove()
     }
 
@@ -729,15 +650,15 @@
             }
         }
         if (!url.includes('category=archived')) return
-        const headers = document.getElementsByClassName('file-expander-header')
-        const downloads = document.getElementsByClassName('accordion-downloads')
+        const headers = document.getElementsByClassName('file-expander-header'),
+            downloads = document.getElementsByClassName('accordion-downloads')
         for (let i = 0; i < headers.length; i++) {
-            const fileId = headers[i]?.dataset?.id
-            const box = downloads[i]
+            const fileId = headers[i]?.dataset?.id,
+                box = downloads[i]
             if (!fileId || !box || handledArchive.has(box)) continue
             handledArchive.add(box)
-            const safeId = encodeURIComponent(fileId)
-            const safeBase = escapeAttr(`${location.origin}${location.pathname}`)
+            const safeId = encodeURIComponent(fileId),
+                safeBase = escapeAttr(`${location.origin}${location.pathname}`)
             box.innerHTML = `<a class="btn inline-flex" href="${safeBase}?tab=files&file_id=${safeId}&nmm=1"><span class="flex-label">Mod manager download</span></a> <a class="btn inline-flex" href="${safeBase}?tab=files&file_id=${safeId}"><span class="flex-label">Manual download</span></a>`
         }
     }
@@ -749,8 +670,8 @@
             if (handledForceNmm.has(link)) continue
             const text = (link.textContent || link.getAttribute('aria-label') || '').toLowerCase()
             if (!text.includes('manual')) continue
-            let hasManagerLink = false
-            let searchArea = link.parentElement
+            let hasManagerLink = false,
+                searchArea = link.parentElement
             for (let i = 0; i < 3; i++) {
                 if (!searchArea) break
                 for (const el of searchArea.querySelectorAll('a, button')) {
@@ -771,13 +692,7 @@
             const clone = nodeToClone.cloneNode(true)
             const managerLink = isLi ? clone.querySelector('a') : clone
             if (managerLink.href && managerLink.href.includes('file_id=')) {
-                try {
-                    const nmmUrl = new URL(managerLink.href, location.origin)
-                    nmmUrl.searchParams.set('nmm', '1')
-                    managerLink.href = nmmUrl.toString()
-                } catch (e) {
-                    managerLink.href += (managerLink.href.includes('?') ? '&' : '?') + 'nmm=1'
-                }
+                managerLink.href = appendNmmParam(managerLink.href)
             }
             const label = managerLink.querySelector('.flex-label') || managerLink
             label.textContent = text.includes('download') ? '(NNW++) Mod manager download' : '(NNW++) Mod manager'
@@ -801,6 +716,7 @@
             { key: 'CloseTabDelay', label: 'Auto-Close Tab Delay', type: 'number', description: 'Delay before automatically closing the tab after download starts (in milliseconds)', showIf: () => cfg.AutoStartDownload && cfg.AutoCloseTab },
             { key: 'ErrorSoundUrl', label: 'Error Sound URL', type: 'text', description: 'URL of the custom sound file to play for error alerts', showIf: () => cfg.PlayErrorSound }
         ]
+
         const STYLES = {
             modal: "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2f2f2f;color:#dadada;padding:25px;border-radius:4px;z-index:2147483647;min-width:300px;max-width:90%;max-height:90vh;overflow-y:auto;font-family:'Inter','Helvetica Neue', Helvetica, Arial, sans-serif;",
             backdrop: 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.5);z-index:2147483646;',
@@ -809,12 +725,9 @@
             input: 'background:#2f2f2f;border:1px solid #444;color:#dadada;border-radius:3px;padding:5px;',
             row: 'margin-bottom:10px;',
             label: 'display:flex;align-items:center;gap:8px;',
-            btnObj: {
-                primary: 'padding:8px 15px;border:none;background:#da8e35;color:white;border-radius:3px;cursor:pointer;',
-                secondary: 'padding:8px 15px;border:1px solid #da8e35;background:transparent;color:#da8e35;border-radius:3px;cursor:pointer;',
-                closeX: 'position:absolute;top:10px;right:10px;background:transparent;border:none;color:#fff;font-size:18px;cursor:pointer;line-height:1;padding:5px;'
-            }
+            btnObj: { primary: 'padding:8px 15px;border:none;background:#da8e35;color:white;border-radius:3px;cursor:pointer;', secondary: 'padding:8px 15px;border:1px solid #da8e35;background:transparent;color:#da8e35;border-radius:3px;cursor:pointer;', closeX: 'position:absolute;top:10px;right:10px;background:transparent;border:none;color:#fff;font-size:18px;cursor:pointer;line-height:1;padding:5px;' }
         }
+
         function save() {
             try {
                 GM_setValue(CONFIG_KEY, JSON.stringify(cfg))
@@ -823,8 +736,9 @@
                 Logger.error('Failed to save config:', e)
             }
         }
-        let activeModal = null
-        let activeBackdrop = null
+
+        let activeModal = null,
+            activeBackdrop = null
         const closeModal = () => {
             activeModal?.remove()
             activeModal = null
@@ -835,6 +749,7 @@
         const onSettingsKeyDown = event => {
             if (event.key === 'Escape') closeModal()
         }
+
         function showSettingsModal() {
             cfg = loadConfig()
             closeModal()
@@ -850,28 +765,24 @@
                 const desc = escapeAttr(setting.description || '')
                 if (setting.type === 'bool') {
                     return `<div style="${STYLES.row}display:${display}"><label title="${desc}" style="${STYLES.label}cursor:pointer;"><input type="checkbox" data-setting="${setting.key}" ${cfg[setting.key] ? 'checked' : ''}><span>${setting.label}</span></label></div>`
-                }
-                if (setting.type === 'number') {
+                } else if (setting.type === 'number') {
                     const step = setting.key === 'CloseTabDelay' ? 100 : 1
                     return `<div style="${STYLES.row}display:${display}"><label title="${desc}" style="${STYLES.label}"><span>${setting.label}:</span><input type="number" value="${escapeAttr(cfg[setting.key])}" min="0" step="${step}" data-setting="${setting.key}" style="${STYLES.input}width:120px;"></label></div>`
-                }
-                if (setting.type === 'text') {
+                } else if (setting.type === 'text') {
                     return `<div style="${STYLES.row}display:${display}"><label title="${desc}" style="${STYLES.label}flex-direction:column;align-items:stretch;gap:4px;"><span style="font-size:0.9em;color:#aaa;">${setting.label}:</span><input type="text" value="${escapeAttr(cfg[setting.key])}" data-setting="${setting.key}" style="${STYLES.input}width:95%;"></label></div>`
                 }
                 return ''
             }
-            const features = SETTING_UI.filter(u => u.type === 'bool' || u.type === 'text')
-                .map(build)
-                .join('')
-            const timing = SETTING_UI.filter(u => u.type === 'number')
-                .map(build)
-                .join('')
 
             modal.innerHTML = `<style>a:hover { text-decoration: underline !important; }</style>
         <button id="closeSettingsX" style="${STYLES.btnObj.closeX}">×</button>
         <h3 style="${STYLES.sectionHeader}margin-top:0;">NexusNoWait++ Settings</h3>
-        <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Features</h4>${features}</div>
-        <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Timing</h4>${timing}</div>
+        <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Features</h4>${SETTING_UI.filter(u => u.type !== 'number')
+            .map(build)
+            .join('')}</div>
+        <div style="${STYLES.section}"><h4 style="${STYLES.sectionHeader}">Timing</h4>${SETTING_UI.filter(u => u.type === 'number')
+            .map(build)
+            .join('')}</div>
         <div style="display:flex;justify-content:center;gap:10px;margin-top:20px;"><button id="resetSettings" style="${STYLES.btnObj.secondary}">Reset Settings</button><button id="closeSettings" style="${STYLES.btnObj.primary}">Save & Close</button></div>
         <div style="text-align:center;margin-top:10px;color:#888;font-size:11px;">Some changed settings may require a page reload to take effect.</div>
         <div style="text-align:center;margin-top:12px;color:#666;font-size:12px;">v${GM_info.script.version} by Torkelicious</div>
@@ -889,10 +800,7 @@
                 const key = element.getAttribute('data-setting')
                 if (!key) return
                 let value = element.type === 'checkbox' ? element.checked : element.type === 'number' ? parseInt(element.value, 10) : element.value
-                if (typeof value === 'number' && isNaN(value)) {
-                    element.value = cfg[key]
-                    return
-                }
+                if (typeof value === 'number' && isNaN(value)) return (element.value = cfg[key])
                 if (cfg[key] !== value) {
                     cfg[key] = value
                     save()
@@ -948,8 +856,8 @@
     }
 
     let lastUrl = location.href
-    const originalPushState = history.pushState
-    const originalReplaceState = history.replaceState
+    const originalPushState = history.pushState,
+        originalReplaceState = history.replaceState
     function onNavigate() {
         if (location.href === lastUrl) return
         lastUrl = location.href
