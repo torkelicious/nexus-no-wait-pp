@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.2.0
+// @version     2.2.1
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -461,7 +461,8 @@
 
     // click interception
     const IGNORE_ANCESTORS = '.pagination, .comment-container, .comment-content, .forum-post, .search-results, #nnwpp-btn'
-    const DOWNLOAD_HREF_PATTERNS = ['/Core/Libs/Common/', 'tab=files&file_id=', 'file_id=', 'ModRequirementsPopUp', '/api/files/', 'nxm://']
+    const ALLOWED_AJAX_POPUP_HREF_PATTERNS = ['Widgets/ModRequirementsPopUp']
+    const DOWNLOAD_HREF_PATTERNS = ['tab=files&file_id=', 'file_id=', 'Widgets/ModRequirementsPopUp', '/api/files/', 'nxm://']
     const isDownloadHref = href => DOWNLOAD_HREF_PATTERNS.some(p => href.toLowerCase().includes(p.toLowerCase()))
 
     function extractFileId(href) {
@@ -502,6 +503,8 @@
                 const element = path.find(n => n && (n.tagName === 'A' || n.tagName === 'BUTTON')) || event.target.closest('a,button')
                 if (!element || element.closest(IGNORE_ANCESTORS)) return
                 let href = element.getAttribute('href') || element.href || ''
+                // Gate unless explicitly in allowlist
+                if (element.classList.contains('popup-btn-ajax') && !ALLOWED_AJAX_POPUP_HREF_PATTERNS.some(p => href.includes(p))) return
                 if (href.includes('tab=files') && !href.includes('file_id=')) return
                 const isNMM = isNMMDownload(element, href)
                 let fileId = extractFileId(href)
