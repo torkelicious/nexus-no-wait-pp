@@ -84,6 +84,4 @@ If nothing above fixes the problem:
 
 ---
 
-Originally based on [StrangeT's Nexus No Wait](https://greasyfork.org/en/scripts/394039-nexus-no-wait) (seems to be deleted now?)
-
-[GitHub repository](https://github.com/torkelicious/nexus-no-wait-pp/tree/main)
+**Originally based on StrangeT's Nexus No Wait**
