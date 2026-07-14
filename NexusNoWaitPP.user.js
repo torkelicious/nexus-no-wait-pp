@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.2.2
+// @version     2.2.3
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -29,7 +29,7 @@
     // config / state
     const CONFIG_KEY = 'NexusNoWaitPP'
     const AUDIO_CACHE_KEY = 'NexusNoWaitPP_ErrorSoundCache'
-    const DEFAULTS = { AutoStartDownload: true, AutoCloseTab: true, SkipRequirements: true, ShowAlertsOnError: true, PlayErrorSound: true, ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/cf4fdca1cde74a173ac115e95eb1c8ffeb19a4ae/errorsound.mp3', HandleArchivedFiles: true, HidePremiumUpsells: false, OverrideFileNames: false, ForceModManagerDownload: false, CloseTabDelay: 2000, RequestTimeout: 30000 }
+    const DEFAULTS = { AutoStartDownload: true, AutoCloseTab: true, VpnMode: false, SkipRequirements: true, ShowAlertsOnError: true, PlayErrorSound: true, ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/cf4fdca1cde74a173ac115e95eb1c8ffeb19a4ae/errorsound.mp3', HandleArchivedFiles: true, HidePremiumUpsells: false, OverrideFileNames: false, ForceModManagerDownload: false, CloseTabDelay: 2000, RequestTimeout: 30000 }
 
     function loadConfig() {
         try {
@@ -249,7 +249,7 @@
         if (href?.includes('/api/files/')) {
             const target = isNMM ? appendNmmParam(href) : href
             const res = await gmRequest(target, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-            if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge' }
+            if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge', blockedUrl: target }
             const link = (res.finalUrl && res.finalUrl !== target ? res.finalUrl : null) || extract(res)
             if (link) return { url: link }
         }
@@ -257,7 +257,7 @@
         if (isNMM && href) {
             const target = appendNmmParam(href)
             const res = await gmRequest(target, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-            if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge' }
+            if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge', blockedUrl: target }
             let link = extract(res)
             if (!link && isRequirementsUrl(target)) {
                 const rm = res.text.match(/href=["']([^"']*?file_id[^"']*?)["']/i)
@@ -269,7 +269,7 @@
         if (fileId) {
             const spoof = `https://www.nexusmods.com${location.pathname}?tab=files&file_id=${fileId}`
             const res = await gmRequest('/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl', { method: 'POST', data: `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || '')}${isNMM ? '&nmm=1' : ''}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest', Origin: 'https://www.nexusmods.com', Referer: href || spoof } })
-            if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge' }
+            if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge', blockedUrl: href || spoof }
             const link = parseDownloadURLFromResponse(res.text)?.url
             if (link) return { url: link }
         }
@@ -344,12 +344,30 @@
         logEvent('debug', isAutoStart ? 'download:auto-start' : 'download:start', { fileId, isNMM, href })
         const gameId = getGameId(btn)
 
-        const { url, error } = await getDownloadUrl({ fileId, gameId, isNMM, href })
-        if (error) return handleError(btn || null, error)
-
+        const { url, error, blockedUrl } = await getDownloadUrl({ fileId, gameId, isNMM, href })
+        if (error) {
+            if (cfg.VpnMode) {
+                const fallbackUrl = blockedUrl || href || `https://www.nexusmods.com${location.pathname}?tab=files&file_id=${fileId}${isNMM ? '&nmm=1' : ''}`
+                logEvent('info', 'Error encountered in VPN Mode. doing direct redirect.', { error, fallbackUrl })
+                if (btn) setButtonState(btn, 'downloading')
+                location.assign(fallbackUrl)
+                if (btn) restoreButtonState(btn)
+                return
+            }
+            return handleError(btn || null, error)
+        }
         if (btn) setButtonState(btn, 'downloading')
         let finalUrl = await normalizeDownloadUrl(url, isNMM)
-        if (!finalUrl) return handleError(btn || null, 'Failed to resolve download URL')
+        if (!finalUrl) {
+            if (cfg.VpnMode) {
+                const fallbackUrl = href || `https://www.nexusmods.com${location.pathname}?tab=files&file_id=${fileId}${isNMM ? '&nmm=1' : ''}`
+                logEvent('info', 'Normalization failed in VPN Mode. Going to:', { fallbackUrl })
+                location.assign(fallbackUrl)
+                if (btn) restoreButtonState(btn)
+                return
+            }
+            return handleError(btn || null, 'Failed to resolve download URL')
+        }
 
         if (isRequirementsUrl(finalUrl) && !cfg.SkipRequirements) {
             logEvent('info', 'Halting flow: File has requirements & SkipRequirements is false', { finalUrl })
@@ -576,6 +594,7 @@
         const SETTING_UI = [
             { key: 'AutoStartDownload', label: 'Auto Start Download on file_id= URLs', type: 'bool', description: 'Automatically start downloads when visiting file download pages (URLs containing file_id=)' },
             { key: 'AutoCloseTab', label: 'Auto-Close Tab After AutoStartDownload', type: 'bool', description: 'Auto-close may be unreliable due to browser permissions.', showIf: () => cfg.AutoStartDownload },
+            { key: 'VpnMode', label: 'VPN Mode (Fallback Redirect)', type: 'bool', description: 'If a background request hits Cloudflare etc, redirect your browser directly to the link so you can solve the challenge naturally.' },
             { key: 'SkipRequirements', label: 'Skip Requirements PopUp/Tab', type: 'bool', description: 'Skip the requirements popup/page and proceed directly to download' },
             { key: 'ShowAlertsOnError', label: 'Show Alert Messages on Errors', type: 'bool', description: 'Display error messages as browser popup alerts' },
             { key: 'PlayErrorSound', label: 'Play Error Sound', type: 'bool', description: 'Play an error sound when download errors occur' },
