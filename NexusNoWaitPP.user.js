@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.2.1
+// @version     2.2.2
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -33,8 +33,9 @@
 
     function loadConfig() {
         try {
-            const raw = typeof GM_getValue === 'function' ? GM_getValue(CONFIG_KEY, null) : null
-            const parsed = raw ? { ...DEFAULTS, ...(typeof raw === 'string' ? JSON.parse(raw) : raw) } : { ...DEFAULTS }
+            let raw = typeof GM_getValue === 'function' ? GM_getValue(CONFIG_KEY, null) : null
+            if (typeof raw === 'string') raw = JSON.parse(raw)
+            const parsed = { ...DEFAULTS, ...(raw || {}) }
             logEvent('debug', 'config:load', { activeConfig: parsed })
             return parsed
         } catch (e) {
@@ -74,11 +75,10 @@
     // network setup
     const gmXmlHttpRequest = typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest.bind(GM) : typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : null
     if (!gmXmlHttpRequest) Logger.error('No GM XHR API available. Script may not function correctly.')
-
-    // network utils
     function gmRequest(url, opts = {}) {
         return new Promise(resolve => {
-            if (!gmXmlHttpRequest) return resolve({ text: '', finalUrl: '', headers: '' })
+            if (!gmXmlHttpRequest) return resolve({ text: '', finalUrl: '', headers: '', status: 0 })
+            const done = r => resolve({ text: r?.responseText || '', finalUrl: r?.finalUrl || '', headers: r?.responseHeaders || '', status: r?.status || 0 })
             gmXmlHttpRequest({
                 method: opts.method || 'GET',
                 ...opts,
@@ -86,17 +86,23 @@
                 timeout: opts.timeout ?? cfg.RequestTimeout,
                 headers: opts.headers || {},
                 data: opts.data || null,
-                onload: r => resolve({ text: r.responseText || '', finalUrl: r.finalUrl || '', headers: r.responseHeaders || '' }),
+                onload: done,
                 onerror: e => {
-                    logEvent('error', 'network:request-failed', { url, error: e })
-                    resolve({ text: '', finalUrl: '', headers: '' })
+                    logEvent('error', 'network:failed', { url, e })
+                    done()
                 },
                 ontimeout: () => {
-                    logEvent('warn', 'network:request-timeout', { url })
-                    resolve({ text: '', finalUrl: '', headers: '' })
+                    logEvent('warn', 'network:timeout', { url })
+                    done()
                 }
             })
         })
+    }
+
+    function isCloudflareChallenge(res) {
+        if (!res?.text) return false
+        if (/cf-turnstile|challenges\.cloudflare\.com|Just a moment|Attention Required!|cf-error-details|id="challenge-form"|cf-browser-verification|window\._cf_chl_opt/i.test(res.text)) return true
+        return (res.status === 403 || res.status === 503) && /cf-ray|server:\s*cloudflare/i.test(res.headers) && res.text.trim().startsWith('<')
     }
 
     // audio setup
@@ -106,85 +112,61 @@
         errorAudioPlayer.load()
     }
 
-    async function setupAudio() {
+    function setupAudio() {
         if (!cfg.PlayErrorSound || !cfg.ErrorSoundUrl || errorAudioPlayer) return
-        const cachedSound = typeof GM_getValue === 'function' ? GM_getValue(AUDIO_CACHE_KEY, null) : null
-        if (cachedSound) {
-            logEvent('debug', 'audio:loaded-from-cache')
-            initAudioPlayer(cachedSound)
-        } else {
-            logEvent('debug', 'audio:fetching-from-network')
-            const b64DataURI = await new Promise(resolve => {
-                if (!gmXmlHttpRequest) return resolve(null)
-                gmXmlHttpRequest({
-                    method: 'GET',
-                    url: cfg.ErrorSoundUrl,
-                    responseType: 'blob',
-                    onload: res => {
-                        if (res.status >= 200 && res.status < 300 && res.response) {
-                            const reader = new FileReader()
-                            reader.onloadend = () => resolve(reader.result)
-                            reader.onerror = () => resolve(null)
-                            reader.readAsDataURL(res.response)
-                        } else resolve(null)
-                    },
-                    onerror: () => resolve(null),
-                    ontimeout: () => resolve(null)
-                })
-            })
-            if (b64DataURI) {
-                if (typeof GM_setValue === 'function') {
-                    GM_setValue(AUDIO_CACHE_KEY, b64DataURI)
-                    logEvent('debug', 'audio:saved-to-cache')
-                }
-                initAudioPlayer(b64DataURI)
-            } else {
-                logEvent('warn', 'audio:fetch-failed-using-fallback')
-                initAudioPlayer(cfg.ErrorSoundUrl)
-            }
-        }
+        const cached = typeof GM_getValue === 'function' ? GM_getValue(AUDIO_CACHE_KEY, null) : null
+        if (cached) return initAudioPlayer(cached)
+
+        if (!gmXmlHttpRequest) return initAudioPlayer(cfg.ErrorSoundUrl)
+        gmXmlHttpRequest({
+            method: 'GET',
+            url: cfg.ErrorSoundUrl,
+            responseType: 'blob',
+            onload: res => {
+                if (res.status >= 200 && res.status < 300 && res.response) {
+                    const reader = new FileReader()
+                    reader.onloadend = () => {
+                        if (typeof GM_setValue === 'function') GM_setValue(AUDIO_CACHE_KEY, reader.result)
+                        initAudioPlayer(reader.result)
+                    }
+                    reader.readAsDataURL(res.response)
+                } else initAudioPlayer(cfg.ErrorSoundUrl)
+            },
+            onerror: () => initAudioPlayer(cfg.ErrorSoundUrl),
+            ontimeout: () => initAudioPlayer(cfg.ErrorSoundUrl)
+        })
     }
 
-    function playErrorSound() {
+    const playErrorSound = () => {
         if (errorAudioPlayer) {
             errorAudioPlayer.currentTime = 0
-            errorAudioPlayer.play().catch(e => Logger.warn('Error playing sound:', e))
+            errorAudioPlayer.play().catch(e => Logger.warn('Audio err:', e))
         }
     }
 
     // DOM & parsing utils
-    function escapeAttr(str) {
-        return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    }
-
-    function sanitizeFilename(name) {
-        if (!name) return name
-        return String(name).replace(/\\/g, '/').split('/').pop().replace(/^\.+/, '').trim() || 'nexus_download'
-    }
-
+    const escapeAttr = str => String(str).replace(/[&"'<>]/g, m => ({ '&': '&amp;', '"': '&quot;', "'": '&#39;', '<': '&lt;', '>': '&gt;' })[m])
+    const sanitizeFilename = name => (name ? String(name).replace(/\\/g, '/').split('/').pop().replace(/^\.+/, '').trim() || 'nexus_download' : name)
     const appendNmmParam = href => (!href || href.includes('nmm=1') ? href : `${href}${href.includes('?') ? '&' : '?'}nmm=1`)
     const isModPage = () => /\/mods\/\d+/.test(location.pathname)
+    const REQUIREMENTS_URL_PATTERN = /ModRequirementsPopUp|tab=requirements/i
+    const isRequirementsUrl = href => REQUIREMENTS_URL_PATTERN.test(href)
 
-    function isNMMDownload(element, href = '') {
+    function isNMMDownload(el, href = '') {
         if (href && (href.startsWith('nxm://') || href.includes('nmm=1') || href.includes('&nmm=1'))) return true
-        if (!element) return false
-        if (element.id === 'action-vortex' || element.id === 'action-nmm') return true
-        const text = (element.textContent || (typeof element.getAttribute === 'function' && element.getAttribute('aria-label')) || '').toLowerCase()
-        return /(vortex|mod manager|manager download)/i.test(text)
+        if (!el) return false
+        if (el.dataset?.nnwppIsNmm !== undefined) return el.dataset.nnwppIsNmm === '1'
+        if (el.id === 'action-vortex' || el.id === 'action-nmm') return true
+        return /(vortex|mod manager|manager download)/i.test((el.textContent || el.getAttribute('aria-label') || '').toLowerCase())
     }
 
-    const getGameId = (clickedElement = null) => {
-        if (clickedElement) {
-            let current = clickedElement
-            while (current) {
-                if (['MOD-DOWNLOAD-BUTTONS', 'MOD-FILE-DOWNLOAD'].includes(current.tagName) && current.getAttribute('game-id')) {
-                    return current.getAttribute('game-id')
-                }
-                current = current.parentNode || (current instanceof ShadowRoot ? current.host : null)
-            }
+    function getGameId(el = null) {
+        while (el) {
+            if (['MOD-DOWNLOAD-BUTTONS', 'MOD-FILE-DOWNLOAD'].includes(el.tagName) && el.getAttribute('game-id')) return el.getAttribute('game-id')
+            el = el.parentNode || (el instanceof ShadowRoot ? el.host : null)
         }
-        const el = document.querySelector('[data-game-id], [game-id]')
-        if (el) return el.dataset.gameId || el.getAttribute('game-id')
+        const dataEl = document.querySelector('[data-game-id], [game-id]')
+        if (dataEl) return dataEl.dataset.gameId || dataEl.getAttribute('game-id')
         for (const script of document.querySelectorAll('script')) {
             const m = script.textContent.match(/game_id\s*:\s*(\d+)/) || script.textContent.match(/gameId\s*:\s*(\d+)/)
             if (m) return m[1]
@@ -195,127 +177,102 @@
     function parseDownloadURLFromResponse(text) {
         if (!text) return null
         try {
-            const json = JSON.parse(String(text))
-            if (json?.url) return { url: json.url.replace(/&amp;/g, '&') }
+            const j = JSON.parse(String(text))
+            if (j?.url) return { url: j.url.replace(/&amp;/g, '&') }
         } catch (e) {}
-        const match = String(text).match(/id=["']dl_link["'][^>]*value=["']([^"']+)["']/i)
-        return match ? { url: match[1].replace(/&amp;/g, '&') } : null
+        const m = String(text).match(/id=["']dl_link["'][^>]*value=["']([^"']+)["']/i)
+        return m ? { url: m[1].replace(/&amp;/g, '&') } : null
     }
 
     function parseDownloadLink(text) {
         if (!text) return null
-        text = String(text).replace(/&amp;/g, '&').replace(/\\\//g, '/')
-        const match = text.match(/nxm:\/\/[^\s"'<>]+/i)
-        if (!match) return null
-        const url = match[0]
-        const queryIndex = url.indexOf('?')
-        if (queryIndex === -1) return null
-        const params = new URLSearchParams(url.slice(queryIndex + 1))
-        if (!params.has('key') || !params.has('expires') || !params.has('user_id')) return null
-        return url
+        const m = String(text)
+            .replace(/&amp;/g, '&')
+            .replace(/\\\//g, '/')
+            .match(/nxm:\/\/[^\s"'<>]+/i)
+        if (!m || !m[0].includes('?')) return null
+        const p = new URLSearchParams(m[0].slice(m[0].indexOf('?') + 1))
+        return p.has('key') && p.has('expires') && p.has('user_id') ? m[0] : null
     }
 
-    function getFilenameFromHead(headerStr) {
-        if (!headerStr) return null
-        if (typeof headerStr === 'object') headerStr = headerStr['content-disposition'] || headerStr['Content-Disposition'] || ''
-        const match = String(headerStr).match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i)
-        return match && match[1] ? match[1].replace(/['"]/g, '').trim() : null
+    function getFilenameFromHead(h) {
+        if (!h) return null
+        if (typeof h === 'object') h = h['content-disposition'] || h['Content-Disposition'] || ''
+        const m = String(h).match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i)
+        return m?.[1] ? m[1].replace(/['"]/g, '').trim() : null
     }
 
     // requirements detection
     function readRequirementsFlag(el) {
-        if (!el || typeof el.getAttribute !== 'function') return null
-        let sawAnyAttribute = false,
-            hasEntries = false,
-            hadParseError = false
-        const reqRaw = el.getAttribute('requirements')
-        if (reqRaw !== null && reqRaw !== undefined) {
-            sawAnyAttribute = true
+        if (!el?.getAttribute) return null
+        let saw = false,
+            has = false,
+            err = false
+        const check = (attr, isDep) => {
+            const val = el.getAttribute(attr)
+            if (val == null) return
+            saw = true
             try {
-                const parsed = JSON.parse(reqRaw)
-                if (Array.isArray(parsed) && parsed.length > 0) hasEntries = true
-            } catch (e) {
-                hadParseError = true
+                const p = JSON.parse(val)
+                if (Array.isArray(p) && (isDep ? p.some(g => g?.files?.length > 0) : p.length > 0)) has = true
+            } catch {
+                err = true
             }
         }
-        const depRaw = el.getAttribute('dependencies')
-        if (depRaw !== null && depRaw !== undefined) {
-            sawAnyAttribute = true
-            try {
-                const parsed = JSON.parse(depRaw)
-                if (Array.isArray(parsed) && parsed.some(group => Array.isArray(group?.files) && group.files.length > 0)) {
-                    hasEntries = true
-                }
-            } catch (e) {
-                hadParseError = true
-            }
-        }
-        if (!sawAnyAttribute) return false
-        if (hasEntries) return true
-        if (hadParseError) return null
-        return false
+        check('requirements', false)
+        check('dependencies', true)
+        if (!saw) return false
+        if (has) return true
+        return err ? null : false
     }
 
     function detectRequirements(elements) {
-        let sawDefinitiveFalse = false,
-            sawAnyCandidate = false
+        let defFalse = false,
+            candidate = false
         for (const el of elements) {
             if (!el) continue
-            sawAnyCandidate = true
+            candidate = true
             const flag = readRequirementsFlag(el)
             if (flag === true) return { hasRequirements: true, unknown: false }
-            if (flag === false) sawDefinitiveFalse = true
+            if (flag === false) defFalse = true
         }
-        if (sawDefinitiveFalse) return { hasRequirements: false, unknown: false }
-        return { hasRequirements: false, unknown: sawAnyCandidate }
+        return { hasRequirements: false, unknown: !defFalse && candidate }
     }
 
     // download resolution
     async function getDownloadUrl({ fileId, gameId, isNMM, href }) {
         if (!fileId && !href) return { url: null, error: 'Missing fileId' }
-        if (href && href.startsWith('nxm://')) return { url: href }
-        let link = null
-        if (href && href.includes('/api/files/')) {
-            logEvent('info', 'download:resolve-api', { href })
-            let targetApiUrl = isNMM ? appendNmmParam(href) : href
-            try {
-                const res = await gmRequest(targetApiUrl, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-                link = res.finalUrl && res.finalUrl !== targetApiUrl ? res.finalUrl : null
-                const locationMatch = res.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i)
-                if (locationMatch) link = locationMatch[1]
-                const extractedJson = parseDownloadURLFromResponse(res.text)
-                if (extractedJson) link = extractedJson.url
-                const extractedNxm = parseDownloadLink(res.text) || parseDownloadLink(res.finalUrl)
-                if (extractedNxm) link = extractedNxm
-                if (link) return { url: link }
-            } catch (err) {
-                Logger.warn('API fetch failed:', err)
-            }
+        if (href?.startsWith('nxm://')) return { url: href }
+
+        const extract = r => r.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i)?.[1] || parseDownloadURLFromResponse(r.text)?.url || parseDownloadLink(r.text) || parseDownloadLink(r.finalUrl)
+
+        if (href?.includes('/api/files/')) {
+            const target = isNMM ? appendNmmParam(href) : href
+            const res = await gmRequest(target, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge' }
+            const link = (res.finalUrl && res.finalUrl !== target ? res.finalUrl : null) || extract(res)
+            if (link) return { url: link }
         }
+
         if (isNMM && href) {
-            let nmmHref = appendNmmParam(href)
-            const res = await gmRequest(nmmHref, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-            link = parseDownloadLink(res.finalUrl) || (res.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i) || [])[1] || parseDownloadLink(res.text)
-            if (!link && /ModRequirementsPopUp|tab=requirements/i.test(nmmHref)) {
-                const reqMatch = res.text.match(/href=["']([^"']*?file_id[^"']*?)["']/i)
-                if (reqMatch) {
-                    const res2 = await gmRequest(reqMatch[1])
-                    link = parseDownloadLink(res2.finalUrl) || (res2.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i) || [])[1] || parseDownloadLink(res2.text)
-                }
+            const target = appendNmmParam(href)
+            const res = await gmRequest(target, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge' }
+            let link = extract(res)
+            if (!link && isRequirementsUrl(target)) {
+                const rm = res.text.match(/href=["']([^"']*?file_id[^"']*?)["']/i)
+                if (rm) link = extract(await gmRequest(rm[1]))
             }
             if (link) return { url: link }
         }
-        if (fileId) {
-            const endpoint = '/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl'
-            const spoofedReferer = `https://www.nexusmods.com${location.pathname}?tab=files&file_id=${fileId}`
-            let postData = `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || '')}`
-            if (isNMM) postData += '&nmm=1'
 
-            const res = await gmRequest(endpoint, { method: 'POST', data: postData, headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest', Origin: 'https://www.nexusmods.com', Referer: href || spoofedReferer } })
-            const extracted = parseDownloadURLFromResponse(res.text)
-            if (extracted) link = extracted.url
+        if (fileId) {
+            const spoof = `https://www.nexusmods.com${location.pathname}?tab=files&file_id=${fileId}`
+            const res = await gmRequest('/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl', { method: 'POST', data: `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || '')}${isNMM ? '&nmm=1' : ''}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest', Origin: 'https://www.nexusmods.com', Referer: href || spoof } })
+            if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge' }
+            const link = parseDownloadURLFromResponse(res.text)?.url
+            if (link) return { url: link }
         }
-        if (link) return { url: link }
         return { url: null, error: 'Could not resolve file link (are you logged in?)' }
     }
 
@@ -323,12 +280,8 @@
         if (!url || url.startsWith('nxm://')) return url
         if (url.includes('nexusmods.com') && url.includes('file_id=')) {
             try {
-                const parsed = new URL(url, location.href)
-                const fileId = parsed.searchParams.get('file_id')
-                if (fileId) {
-                    const res = await getDownloadUrl({ fileId, gameId: getGameId(), isNMM, href: url })
-                    if (res?.url) return res.url
-                }
+                const fileId = new URL(url, location.href).searchParams.get('file_id')
+                if (fileId) return (await getDownloadUrl({ fileId, gameId: getGameId(), isNMM, href: url }))?.url || url
             } catch (e) {}
         }
         return url
@@ -337,224 +290,176 @@
     async function scrapeDeepDownloadLink(pageUrl, isNMM) {
         try {
             const res = await gmRequest(pageUrl)
-            const html = res.text
-            const fileDataRegex = /(?:main-file|file)=(["'])(.*?)\1/gi
-            let match
-            while ((match = fileDataRegex.exec(html)) !== null) {
+            const re = /(?:main-file|file)=(["'])(.*?)\1/gi
+            let m
+            while ((m = re.exec(res.text)) !== null) {
                 try {
-                    const unescaped = match[2]
+                    const u = m[2]
                         .replace(/&quot;/g, '"')
                         .replace(/&amp;/g, '&')
                         .replace(/&#34;/g, '"')
-                    if (!unescaped.includes('downloadUrl')) continue
-                    const fileData = JSON.parse(unescaped)
-                    const secureApiUrl = isNMM ? fileData.vortexDownloadUrl || fileData.downloadUrl : fileData.downloadUrl
-                    if (secureApiUrl) return secureApiUrl
+                    if (!u.includes('downloadUrl')) continue
+                    const fd = JSON.parse(u)
+                    if (isNMM ? fd.vortexDownloadUrl || fd.downloadUrl : fd.downloadUrl) return isNMM ? fd.vortexDownloadUrl || fd.downloadUrl : fd.downloadUrl
                 } catch (e) {}
             }
-            const cdnMatch = html.match(/https?:\/\/[a-zA-Z0-9-]+\.nexus-cdn\.com[^"']+/i)
-            if (cdnMatch) return cdnMatch[0].replace(/&amp;/g, '&')
-            return null
-        } catch (e) {
+            return res.text.match(/https?:\/\/[a-zA-Z0-9-]+\.nexus-cdn\.com[^"']+/i)?.[0].replace(/&amp;/g, '&') || null
+        } catch {
             return null
         }
     }
 
     // button state & execution
-    function setButtonState(button, state, message) {
-        if (!button) return
-        const textElement = button.querySelector('span.flex-label, span') || button
-        const stateConfig = { waiting: { text: 'Please Wait...', color: 'orange' }, downloading: { text: 'Downloading!', color: 'green' }, error: { text: message || 'Error', color: 'red' } }
-        const config = stateConfig[state] || stateConfig.error
-        if (textElement) textElement.innerText = config.text
-        button.style.color = config.color
+    function setButtonState(btn, state, msg) {
+        if (!btn) return
+        const txtEl = btn.querySelector('span.flex-label, span') || btn
+        const sc = { waiting: { text: 'Please Wait...', color: 'orange' }, downloading: { text: 'Downloading!', color: 'green' }, error: { text: msg || 'Error', color: 'red' } }
+        if (txtEl && btn.dataset?.nnwppOrigText === undefined) {
+            btn.dataset.nnwppOrigText = txtEl.innerText
+            btn.dataset.nnwppOrigColor = btn.style.color || ''
+        }
+        if (txtEl) txtEl.innerText = (sc[state] || sc.error).text
+        btn.style.color = (sc[state] || sc.error).color
+    }
+
+    function restoreButtonState(btn, delay = 4000) {
+        if (!btn?.dataset?.nnwppOrigText) return
+        setTimeout(() => {
+            const txtEl = btn.querySelector('span.flex-label, span') || btn
+            if (txtEl) txtEl.innerText = btn.dataset.nnwppOrigText
+            btn.style.color = btn.dataset.nnwppOrigColor || ''
+        }, delay)
     }
 
     function handleError(btn, error) {
-        if (btn) setButtonState(btn, 'error', error)
-        Logger.error('Download Error:', error)
+        const msg = { 'cloudflare-challenge': 'Nexus is showing a security check (Cloudflare) instead of the real response. Disable your VPN or clear it manually in a normal tab.' }[error] || error
+        if (btn) setButtonState(btn, 'error', msg)
+        Logger.error('Download Error:', msg)
         if (cfg.PlayErrorSound) playErrorSound()
-        if (cfg.ShowAlertsOnError) alert(`Download error: ${error}`)
+        if (cfg.ShowAlertsOnError) alert(`Download error: ${msg}`)
     }
 
     async function startDownloadFlow({ btn, fileId, isNMM, href, isAutoStart = false }) {
         if (btn) setButtonState(btn, 'waiting')
         logEvent('debug', isAutoStart ? 'download:auto-start' : 'download:start', { fileId, isNMM, href })
         const gameId = getGameId(btn)
+
         const { url, error } = await getDownloadUrl({ fileId, gameId, isNMM, href })
         if (error) return handleError(btn || null, error)
-        let finalUrl = url
+
         if (btn) setButtonState(btn, 'downloading')
-        finalUrl = await normalizeDownloadUrl(finalUrl, isNMM)
+        let finalUrl = await normalizeDownloadUrl(url, isNMM)
         if (!finalUrl) return handleError(btn || null, 'Failed to resolve download URL')
-        logEvent('info', 'download:resolved', { url: finalUrl })
 
-        // safety: if API returns a Requirements URL and user wants to see requirements then stop
-        if (/ModRequirementsPopUp|tab=requirements/i.test(finalUrl) && !cfg.SkipRequirements) {
+        if (isRequirementsUrl(finalUrl) && !cfg.SkipRequirements) {
             logEvent('info', 'Halting flow: File has requirements & SkipRequirements is false', { finalUrl })
-            location.assign(finalUrl)
-            return
+            return location.assign(finalUrl)
         }
 
-        // prevent redirects
         if (cfg.SkipRequirements && !finalUrl.startsWith('nxm://') && finalUrl.includes('nexusmods.com') && (finalUrl.includes('file_id=') || /\/files\/\d+/i.test(finalUrl)) && !finalUrl.includes('GenerateDownloadUrl') && !finalUrl.includes('nexus-cdn.com')) {
-            const deepLink = await scrapeDeepDownloadLink(finalUrl, isNMM)
-            if (deepLink) {
-                if (deepLink.includes('/api/files/') || deepLink.includes('GenerateDownloadUrl')) {
-                    const resolved = await getDownloadUrl({ href: deepLink, gameId, isNMM })
-                    if (resolved?.url) finalUrl = resolved.url
-                } else {
-                    finalUrl = deepLink
-                }
-            }
+            const dl = await scrapeDeepDownloadLink(finalUrl, isNMM)
+            if (dl) finalUrl = dl.includes('/api/files/') || dl.includes('GenerateDownloadUrl') ? (await getDownloadUrl({ href: dl, gameId, isNMM }))?.url || dl : dl
         }
+
         if (cfg.OverrideFileNames && typeof GM_download === 'function' && !isNMM && !finalUrl.startsWith('nxm://')) {
-            const modIdMatch = location.pathname.match(/\/mods\/(\d+)/)
-            const modId = modIdMatch ? modIdMatch[1] : null
+            const modId = location.pathname.match(/\/mods\/(\d+)/)?.[1]
             if (modId) {
-                let originalName = sanitizeFilename(decodeURIComponent(finalUrl.split('/').pop().split('?')[0])) || 'nexus_download'
-                let extIndex = originalName.lastIndexOf('.')
-                const looksLikeUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(originalName)
-                if (looksLikeUUID || extIndex === -1) {
-                    logEvent('info', 'download: URL hides filename, fetching headers')
+                let name = sanitizeFilename(decodeURIComponent(finalUrl.split('/').pop().split('?')[0])) || 'nexus_download'
+                if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name) || !name.includes('.')) {
                     try {
-                        const headRes = await gmRequest(finalUrl, { method: 'HEAD' })
-                        const realName = sanitizeFilename(getFilenameFromHead(headRes.headers))
-                        if (realName) {
-                            originalName = realName
-                            extIndex = originalName.lastIndexOf('.')
-                        } else {
-                            logEvent('warn', 'download: Could not get real filename from server, fallback', { url: finalUrl })
-                            location.assign(finalUrl)
-                            return
-                        }
+                        const h = await gmRequest(finalUrl, { method: 'HEAD' })
+                        const rName = sanitizeFilename(getFilenameFromHead(h.headers))
+                        if (rName) name = rName
+                        else throw new Error('No real name')
                     } catch (err) {
-                        logEvent('error', 'download: Header fetch failed, fallback', err)
+                        logEvent('warn', 'download: override fallback', err)
                         location.assign(finalUrl)
-                        return
+                        return btn && restoreButtonState(btn)
                     }
                 }
-                let newName = extIndex !== -1 ? `${originalName.substring(0, extIndex)}-${modId}${originalName.substring(extIndex)}` : `${originalName}-${modId}`
-                const idRegex = new RegExp(`(^|[^0-9])${modId}([^0-9]|$)`)
-                if (extIndex === -1) logEvent('info', 'download: filename has no extension, appending ID to end')
-
-                if (idRegex.test(originalName)) {
-                    newName = originalName
-                } else {
-                    logEvent('info', 'download: overriding file-name', { originalName, newName })
-                }
+                const ext = name.lastIndexOf('.'),
+                    idRegex = new RegExp(`(^|[^0-9])${modId}([^0-9]|$)`)
+                let nName = idRegex.test(name) ? name : ext !== -1 ? `${name.substring(0, ext)}-${modId}${name.substring(ext)}` : `${name}-${modId}`
                 GM_download({
                     url: finalUrl,
-                    name: newName,
+                    name: nName,
                     saveAs: false,
-                    onload: () => logEvent('debug', 'download: override name success'),
-                    onerror: err => {
-                        logEvent('warn', 'download: override name failed, fallback', err)
+                    onload: () => btn && restoreButtonState(btn),
+                    onerror: () => {
                         location.assign(finalUrl)
+                        btn && restoreButtonState(btn)
                     }
                 })
                 return
             }
         }
         location.assign(finalUrl)
+        if (btn) restoreButtonState(btn)
     }
 
     // click interception
-    const IGNORE_ANCESTORS = '.pagination, .comment-container, .comment-content, .forum-post, .search-results, #nnwpp-btn'
-    const ALLOWED_AJAX_POPUP_HREF_PATTERNS = ['Widgets/ModRequirementsPopUp']
-    const DOWNLOAD_HREF_PATTERNS = ['tab=files&file_id=', 'file_id=', 'Widgets/ModRequirementsPopUp', '/api/files/', 'nxm://']
-    const isDownloadHref = href => DOWNLOAD_HREF_PATTERNS.some(p => href.toLowerCase().includes(p.toLowerCase()))
+    const isDownloadHref = href => isRequirementsUrl(href) || ['tab=files&file_id=', 'file_id=', '/api/files/', 'nxm://'].some(p => href.toLowerCase().includes(p.toLowerCase()))
 
     function extractFileId(href) {
         try {
-            if (href.startsWith('nxm://')) {
-                const urlParams = new URLSearchParams(href.substring(href.indexOf('?')))
-                return urlParams.get('id') || urlParams.get('file_id')
-            }
-            const url = new URL(href, location.href)
-            const apiMatch = url.pathname.match(/\/api\/files\/(\d+)/)
-            if (apiMatch) return apiMatch[1]
-            return url.searchParams.get('file_id') || url.searchParams.get('id')
-        } catch (e) {
+            const u = href.startsWith('nxm://') ? new URLSearchParams(href.substring(href.indexOf('?'))) : new URL(href, location.href).searchParams
+            return u.get('id') || u.get('file_id') || new URL(href, location.href).pathname.match(/\/api\/files\/(\d+)/)?.[1] || null
+        } catch {
             return null
         }
-    }
-
-    function findDownloadModalInPath(path) {
-        let modal = path.find(n => n && n.tagName === 'MOD-DOWNLOAD-MODAL')
-        if (!modal) {
-            for (const node of path) {
-                if (node && node.shadowRoot) {
-                    modal = node.shadowRoot.querySelector('mod-download-modal')
-                    if (modal) break
-                }
-            }
-        }
-        return modal || path.find(n => n && ['MOD-DOWNLOAD-BUTTONS', 'MOD-FILE-DOWNLOAD'].includes(n.tagName))?.querySelector('mod-download-modal')
     }
 
     function attachClickInterceptor() {
         document.body.addEventListener(
             'click',
-            async function (event) {
+            async event => {
                 if (!isModPage() || !event.isTrusted || event.defaultPrevented) return
-
                 const path = event.composedPath ? event.composedPath() : [event.target]
-                const element = path.find(n => n && (n.tagName === 'A' || n.tagName === 'BUTTON')) || event.target.closest('a,button')
-                if (!element || element.closest(IGNORE_ANCESTORS)) return
-                let href = element.getAttribute('href') || element.href || ''
-                // Gate unless explicitly in allowlist
-                if (element.classList.contains('popup-btn-ajax') && !ALLOWED_AJAX_POPUP_HREF_PATTERNS.some(p => href.includes(p))) return
-                if (href.includes('tab=files') && !href.includes('file_id=')) return
-                const isNMM = isNMMDownload(element, href)
-                let fileId = extractFileId(href)
-                let secureApiUrl = null
+                const el = path.find(n => n?.tagName === 'A' || n?.tagName === 'BUTTON') || event.target.closest('a,button')
+                if (!el || el.closest('.pagination, .comment-container, .comment-content, .forum-post, .search-results, #nnwpp-btn')) return
 
-                const modal = findDownloadModalInPath(path)
+                const href = el.getAttribute('href') || el.href || ''
+                if (el.classList.contains('popup-btn-ajax') && !isRequirementsUrl(href)) return
+                if (href.includes('tab=files') && !href.includes('file_id=')) return
+
+                const isNMM = isNMMDownload(el, href)
+                if (el.dataset?.nnwppIsNmm === undefined) el.dataset.nnwppIsNmm = isNMM ? '1' : '0'
+
+                let fileId = extractFileId(href),
+                    secureApiUrl = null
+                let modal = path.find(n => n?.tagName === 'MOD-DOWNLOAD-MODAL') || path.find(n => n?.shadowRoot?.querySelector('mod-download-modal'))?.shadowRoot.querySelector('mod-download-modal') || path.find(n => ['MOD-DOWNLOAD-BUTTONS', 'MOD-FILE-DOWNLOAD'].includes(n?.tagName))?.querySelector('mod-download-modal')
+
                 if (modal) {
                     try {
-                        const fileData = JSON.parse(modal.getAttribute('file') || '{}')
-                        if (fileData.downloadUrl) secureApiUrl = isNMM ? fileData.vortexDownloadUrl || fileData.downloadUrl : fileData.downloadUrl
+                        const fd = JSON.parse(modal.getAttribute('file') || '{}')
+                        if (fd.downloadUrl) secureApiUrl = isNMM ? fd.vortexDownloadUrl || fd.downloadUrl : fd.downloadUrl
                     } catch (e) {}
                 }
 
-                const hostContainer = path.find(n => n && ['MOD-DOWNLOAD-BUTTONS', 'MOD-FILE-DOWNLOAD'].includes(n.tagName))
+                const hostContainer = path.find(n => ['MOD-DOWNLOAD-BUTTONS', 'MOD-FILE-DOWNLOAD'].includes(n?.tagName))
                 if (!secureApiUrl && hostContainer) {
                     try {
-                        const attrName = hostContainer.tagName === 'MOD-DOWNLOAD-BUTTONS' ? 'main-file' : 'file'
-                        const fileData = JSON.parse(hostContainer.getAttribute(attrName) || '{}')
-                        if (fileData.id && !fileId) fileId = fileData.id.toString()
+                        const fd = JSON.parse(hostContainer.getAttribute(hostContainer.tagName === 'MOD-DOWNLOAD-BUTTONS' ? 'main-file' : 'file') || '{}')
+                        if (fd.id && !fileId) fileId = fd.id.toString()
                     } catch (e) {}
                 }
 
-                const { hasRequirements: hasRequirementsAlert, unknown: requirementsUnknown } = detectRequirements([modal, hostContainer])
-                const hasRequirementsHref = href.includes('ModRequirementsPopUp') || href.includes('tab=requirements')
-                const isDownloadLink = fileId || secureApiUrl || isDownloadHref(href) || (modal && (isNMM || (element.textContent || '').toLowerCase().includes('manual')))
-                if (!isDownloadLink) return
-                if ((hasRequirementsAlert || hasRequirementsHref) && !cfg.SkipRequirements) {
-                    secureApiUrl = null
-                    logEvent('info', 'Yielding to native UI: File has requirements & SkipRequirements is false')
-                    return
-                }
-                if (requirementsUnknown && !cfg.SkipRequirements) {
-                    logEvent('warn', 'Yielding to native UI: could not confirm requirements state & SkipRequirements is false')
-                    return
-                }
-                if (processing.has(element)) return
-                if ((element.textContent || '').toLowerCase().includes('slow download')) return
-                processing.add(element)
+                const { hasRequirements: reqAlert, unknown: reqUnknown } = detectRequirements([modal, hostContainer])
+                const reqHref = isRequirementsUrl(href)
+
+                if (!(fileId || secureApiUrl || isDownloadHref(href) || (modal && (isNMM || (el.textContent || '').toLowerCase().includes('manual'))))) return
+                if ((reqAlert || reqHref || reqUnknown) && !cfg.SkipRequirements) return logEvent('info', 'Yielding to native UI: Requirements active/unknown')
+                if (processing.has(el) || (el.textContent || '').toLowerCase().includes('slow download')) return
+
+                processing.add(el)
                 event.preventDefault()
                 event.stopImmediatePropagation()
                 try {
-                    const finalHref = secureApiUrl || href || `https://www.nexusmods.com${location.pathname}?tab=files&file_id=${fileId}`
-                    if ((hasRequirementsAlert || hasRequirementsHref) && cfg.SkipRequirements) {
-                        logEvent('info', 'requirements:skipped', { isNMM, url: finalHref })
-                    }
-                    await startDownloadFlow({ btn: element, fileId: secureApiUrl ? null : fileId, isNMM, href: finalHref })
+                    await startDownloadFlow({ btn: el, fileId: secureApiUrl ? null : fileId, isNMM, href: secureApiUrl || href || `https://www.nexusmods.com${location.pathname}?tab=files&file_id=${fileId}` })
                 } catch (e) {
-                    handleError(element, String(e))
+                    handleError(el, String(e))
                 } finally {
-                    processing.delete(element)
+                    processing.delete(el)
                 }
             },
             true
@@ -564,16 +469,13 @@
     function interceptRequirementsTab() {
         document.body.addEventListener(
             'click',
-            function (event) {
-                if (!event.isTrusted || event.defaultPrevented || !cfg.SkipRequirements) return
-                const linkElement = event.composedPath ? event.composedPath().find(n => n && n.tagName === 'A') : event.target.closest('a')
-                if (!linkElement) return
-                const href = linkElement.getAttribute('href') || linkElement.href || ''
-                if (!href.includes('tab=requirements')) return
-                event.preventDefault()
-                event.stopImmediatePropagation()
-                logEvent('debug', 'navigation:requirements-tab-intercepted')
-                location.replace(href.replace('tab=requirements', 'tab=files'))
+            e => {
+                if (!e.isTrusted || e.defaultPrevented || !cfg.SkipRequirements) return
+                const link = e.composedPath ? e.composedPath().find(n => n?.tagName === 'A') : e.target.closest('a')
+                if (!link?.href?.includes('tab=requirements')) return
+                e.preventDefault()
+                e.stopImmediatePropagation()
+                location.replace(link.href.replace('tab=requirements', 'tab=files'))
             },
             true
         )
@@ -581,57 +483,40 @@
 
     // features
     async function autoStartDownload() {
-        if (!cfg.AutoStartDownload || !isModPage()) return
-        if (location.search.includes('tab=files') && !location.pathname.includes('/files/')) return
-        if (document.querySelector('mod-file-download')) return
+        if (!cfg.AutoStartDownload || !isModPage() || (location.search.includes('tab=files') && !location.pathname.includes('/files/')) || document.querySelector('mod-file-download')) return
         const fileId = new URLSearchParams(location.search).get('file_id')
         if (!fileId || autoFiredIds.has(fileId)) return
         autoFiredIds.add(fileId)
-        const isNMM = isNMMDownload(null, location.search)
-        await new Promise(r => setTimeout(r, 200))
-        await startDownloadFlow({ fileId, isNMM, href: location.href, isAutoStart: true })
 
-        if (cfg.AutoCloseTab) {
-            logEvent('debug', 'tab:closing', { delay: cfg.CloseTabDelay })
-            setTimeout(() => window.close(), cfg.CloseTabDelay)
-        }
+        await new Promise(r => setTimeout(r, 200))
+        await startDownloadFlow({ fileId, isNMM: isNMMDownload(null, location.search), href: location.href, isAutoStart: true })
+        if (cfg.AutoCloseTab) setTimeout(() => window.close(), cfg.CloseTabDelay)
     }
 
     function setupSlowDownloadIntercept() {
-        if (!location.search.includes('file_id')) return
+        const fid = new URLSearchParams(location.search).get('file_id')
+        if (!fid) return
         const slowBtn = document.querySelector('mod-file-download')?.shadowRoot?.querySelector('button')
         if (!slowBtn || !(slowBtn.textContent || '').toLowerCase().includes('slow download') || attachedSlowDl.has(slowBtn)) return
         attachedSlowDl.add(slowBtn)
-        slowBtn.addEventListener('click', async event => {
-            event.preventDefault()
-            event.stopImmediatePropagation()
-            const fid = new URLSearchParams(location.search).get('file_id')
-            if (fid) {
-                logEvent('debug', 'download:slow-intercept', { fileId: fid, isNMM: isNMMDownload(slowBtn, location.search) })
-                await startDownloadFlow({ btn: slowBtn, fileId: fid, isNMM: isNMMDownload(slowBtn, location.search), href: location.href })
-            }
+
+        const isNMM = isNMMDownload(slowBtn, location.search)
+        slowBtn.addEventListener('click', async e => {
+            e.preventDefault()
+            e.stopImmediatePropagation()
+            await startDownloadFlow({ btn: slowBtn, fileId: fid, isNMM, href: location.href })
         })
 
-        if (cfg.AutoStartDownload) {
-            const fid = new URLSearchParams(location.search).get('file_id')
-            if (fid && !autoFiredIds.has(fid)) {
-                autoFiredIds.add(fid)
-                startDownloadFlow({ btn: slowBtn, fileId: fid, isNMM: isNMMDownload(slowBtn, location.search), href: location.href, isAutoStart: true }).then(() => {
-                    if (cfg.AutoCloseTab) {
-                        logEvent('debug', 'tab:closing', { delay: cfg.CloseTabDelay })
-                        setTimeout(() => window.close(), cfg.CloseTabDelay)
-                    }
-                })
-            }
+        if (cfg.AutoStartDownload && !autoFiredIds.has(fid)) {
+            autoFiredIds.add(fid)
+            startDownloadFlow({ btn: slowBtn, fileId: fid, isNMM, href: location.href, isAutoStart: true }).then(() => cfg.AutoCloseTab && setTimeout(() => window.close(), cfg.CloseTabDelay))
         }
     }
 
     function upsellBlocker() {
         if (!cfg.HidePremiumUpsells) return
         if (!stylesInjected) {
-            logEvent('debug', 'ui:upsell-blocker-active')
-            const selectors = ['#nonPremiumBanner', '#freeTrialBanner', '#ig-banner-container', '#rj-vortex', '[class*="ads-bottom"]', '[class*="ads-top"]', '[class*="to-premium"]', '[class*="from-premium"]', '[class*="premium"]', '#mainContent > div.ads-holder', '#head > div.rj-right-tray.rj-profile-tray.rj-open > ul > li.user-profile-menu-section-top > a']
-            GM_addStyle(selectors.map(s => `${s}{display:none!important}`).join('\n'))
+            GM_addStyle(['#nonPremiumBanner', '#freeTrialBanner', '#ig-banner-container', '#rj-vortex', '[class*="ads-bottom"]', '[class*="ads-top"]', '[class*="to-premium"]', '[class*="from-premium"]', '[class*="premium"]', '#mainContent > div.ads-holder', '#head > div.rj-right-tray.rj-profile-tray.rj-open > ul > li.user-profile-menu-section-top > a'].map(s => `${s}{display:none!important}`).join('\n'))
             stylesInjected = true
         }
         document.querySelector('.bg-nexus-premium-gradient')?.remove()
@@ -645,62 +530,45 @@
             if (footer && !handledArchive.has(footer)) {
                 handledArchive.add(footer)
                 footer.querySelector('p')?.style.setProperty('display', 'none')
-                const hasArchiveBtn = Array.from(footer.querySelectorAll('a.btn.inline-flex .flex-label')).some(el => el.textContent.trim() === 'File archive')
-                if (!hasArchiveBtn) {
-                    logEvent('debug', 'ui:archive-button-restored')
+                if (!Array.from(footer.querySelectorAll('a.btn.inline-flex .flex-label')).some(el => el.textContent.trim() === 'File archive')) {
                     footer.insertAdjacentHTML('beforeend', `<a class="btn inline-flex" data-archived-btn="true" href="${escapeAttr(url)}&category=archived" style="background:#da8e35;color:#fff;margin-left:8px;"><span class="flex-label">File archive</span></a>`)
                 }
             }
         }
         if (!url.includes('category=archived')) return
-        const headers = document.getElementsByClassName('file-expander-header'),
-            downloads = document.getElementsByClassName('accordion-downloads')
-        for (let i = 0; i < headers.length; i++) {
-            const fileId = headers[i]?.dataset?.id,
-                box = downloads[i]
-            if (!fileId || !box || handledArchive.has(box)) continue
+        document.querySelectorAll('.file-expander-header').forEach((h, i) => {
+            const box = document.querySelectorAll('.accordion-downloads')[i],
+                fileId = h?.dataset?.id
+            if (!fileId || !box || handledArchive.has(box) || box.querySelector('p') || h.querySelector('.icon-tickunsafe')) return
             handledArchive.add(box)
-            const safeId = encodeURIComponent(fileId),
-                safeBase = escapeAttr(`${location.origin}${location.pathname}`)
-            box.innerHTML = `<a class="btn inline-flex" href="${safeBase}?tab=files&file_id=${safeId}&nmm=1"><span class="flex-label">Mod manager download</span></a> <a class="btn inline-flex" href="${safeBase}?tab=files&file_id=${safeId}"><span class="flex-label">Manual download</span></a>`
-        }
+            const safeBase = escapeAttr(`${location.origin}${location.pathname}`)
+            box.innerHTML = `<a class="btn inline-flex" href="${safeBase}?tab=files&file_id=${fileId}&nmm=1"><span class="flex-label">Mod manager download</span></a> <a class="btn inline-flex" href="${safeBase}?tab=files&file_id=${fileId}"><span class="flex-label">Manual download</span></a>`
+        })
     }
 
     function forceModManagerHandler() {
         if (!cfg.ForceModManagerDownload || !isModPage()) return
-        const manualLinks = document.querySelectorAll('a[href*="file_id="]:not([href*="nmm=1"]), a.btn[href*="tab=files"]:not([href*="nmm=1"])')
-        for (const link of manualLinks) {
-            if (handledForceNmm.has(link)) continue
-            const text = (link.textContent || link.getAttribute('aria-label') || '').toLowerCase()
-            if (!text.includes('manual')) continue
-            let hasManagerLink = false,
-                searchArea = link.parentElement
-            for (let i = 0; i < 3; i++) {
-                if (!searchArea) break
-                for (const el of searchArea.querySelectorAll('a, button')) {
-                    if (el === link || handledForceNmm.has(el)) continue
-                    const t = (el.textContent || el.getAttribute('aria-label') || '').toLowerCase()
-                    if ((el.href && el.href.includes('nmm=1')) || t.includes('manager') || t.includes('vortex')) {
-                        hasManagerLink = true
-                        break
-                    }
+        document.querySelectorAll('a[href*="file_id="]:not([href*="nmm=1"]), a.btn[href*="tab=files"]:not([href*="nmm=1"])').forEach(link => {
+            if (handledForceNmm.has(link) || !(link.textContent || link.getAttribute('aria-label') || '').toLowerCase().includes('manual')) return
+            let sArea = link.parentElement,
+                hasMan = false
+            for (let i = 0; i < 3 && sArea; i++, sArea = sArea.parentElement) {
+                if (Array.from(sArea.querySelectorAll('a, button')).some(el => el !== link && (el.href?.includes('nmm=1') || /manager|vortex/i.test(el.textContent || el.getAttribute('aria-label') || '')))) {
+                    hasMan = true
+                    break
                 }
-                if (hasManagerLink) break
-                searchArea = searchArea.parentElement
             }
             handledForceNmm.add(link)
-            if (hasManagerLink) continue
-            const isLi = link.parentElement && link.parentElement.tagName === 'LI'
-            const nodeToClone = isLi ? link.parentElement : link
-            const clone = nodeToClone.cloneNode(true)
-            const managerLink = isLi ? clone.querySelector('a') : clone
-            if (managerLink.href && managerLink.href.includes('file_id=')) {
-                managerLink.href = appendNmmParam(managerLink.href)
-            }
-            const label = managerLink.querySelector('.flex-label') || managerLink
-            label.textContent = text.includes('download') ? '(NNW++) Mod manager download' : '(NNW++) Mod manager'
-            nodeToClone.parentNode.insertBefore(clone, nodeToClone)
-        }
+            if (hasMan) return
+            const isLi = link.parentElement?.tagName === 'LI',
+                node = isLi ? link.parentElement : link
+            const clone = node.cloneNode(true),
+                ml = isLi ? clone.querySelector('a') : clone
+            if (ml.href?.includes('file_id=')) ml.href = appendNmmParam(ml.href)
+            const lbl = ml.querySelector('.flex-label') || ml
+            lbl.textContent = (link.textContent || '').toLowerCase().includes('download') ? '(NNW++) Mod manager download' : '(NNW++) Mod manager'
+            node.parentNode.insertBefore(clone, node)
+        })
     }
 
     // Settings UI
@@ -845,7 +713,6 @@
             SettingsUI()
             attachClickInterceptor()
             interceptRequirementsTab()
-            // persistent MutationObserver for SPA DOM injections
             domObserver = new MutationObserver(() => {
                 if (domUpdateTimeout) clearTimeout(domUpdateTimeout)
                 domUpdateTimeout = setTimeout(handleDomUpdates, 150)
@@ -861,11 +728,13 @@
     let lastUrl = location.href
     const originalPushState = history.pushState,
         originalReplaceState = history.replaceState
-    function onNavigate() {
-        if (location.href === lastUrl) return
-        lastUrl = location.href
-        main()
+    const onNavigate = () => {
+        if (location.href !== lastUrl) {
+            lastUrl = location.href
+            main()
+        }
     }
+
     history.pushState = function (...args) {
         originalPushState.apply(this, args)
         onNavigate()
@@ -875,5 +744,6 @@
         onNavigate()
     }
     window.addEventListener('popstate', onNavigate)
+
     main()
 })()
