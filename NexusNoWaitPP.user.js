@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.2.3
+// @version     2.2.4
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -29,7 +29,22 @@
     // config / state
     const CONFIG_KEY = 'NexusNoWaitPP'
     const AUDIO_CACHE_KEY = 'NexusNoWaitPP_ErrorSoundCache'
-    const DEFAULTS = { AutoStartDownload: true, AutoCloseTab: true, VpnMode: false, SkipRequirements: true, ShowAlertsOnError: true, PlayErrorSound: true, ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/cf4fdca1cde74a173ac115e95eb1c8ffeb19a4ae/errorsound.mp3', HandleArchivedFiles: true, HidePremiumUpsells: false, OverrideFileNames: false, ForceModManagerDownload: false, CloseTabDelay: 2000, RequestTimeout: 30000 }
+    const DEFAULTS = {
+        AutoStartDownload: true,
+        AutoCloseTab: true,
+        VpnMode: false,
+        SkipRequirements: true,
+        ShowAlertsOnError: true,
+        PlayErrorSound: true,
+        ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/cf4fdca1cde74a173ac115e95eb1c8ffeb19a4ae/errorsound.mp3',
+        HandleArchivedFiles: true,
+        HidePremiumUpsells: false,
+        OverrideFileNames: false,
+        ForceModManagerDownload: false,
+        CloseTabDelay: 2000,
+        RequestTimeout: 30000,
+        RequestMethod: 'gm'
+    }
 
     function loadConfig() {
         try {
@@ -75,7 +90,37 @@
     // network setup
     const gmXmlHttpRequest = typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest.bind(GM) : typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : null
     if (!gmXmlHttpRequest) Logger.error('No GM XHR API available. Script may not function correctly.')
+
+    const isSameOrigin = url => {
+        try {
+            return new URL(url, location.href).hostname === location.hostname
+        } catch {
+            return false
+        }
+    }
+
+    // native fetch runs in-page
+    // only usable same-origin since GitHub assets etc would hit CORS
+    async function fetchRequest(url, opts = {}) {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), opts.timeout ?? cfg.RequestTimeout)
+        try {
+            const res = await fetch(url, { method: opts.method || 'GET', headers: opts.headers || {}, body: opts.data || undefined, credentials: 'include', redirect: 'follow', signal: controller.signal })
+            const text = await res.text()
+            let headers = ''
+            res.headers.forEach((v, k) => (headers += `${k}: ${v}\n`))
+            return { text, finalUrl: res.url, headers, status: res.status }
+        } catch (e) {
+            const timedOut = e?.name === 'AbortError'
+            logEvent(timedOut ? 'warn' : 'error', timedOut ? 'network:timeout' : 'network:fetch-failed', { url, e: String(e) })
+            return { text: '', finalUrl: '', headers: '', status: 0 }
+        } finally {
+            clearTimeout(timer)
+        }
+    }
+
     function gmRequest(url, opts = {}) {
+        if (cfg.RequestMethod === 'fetch' && isSameOrigin(url)) return fetchRequest(url, opts)
         return new Promise(resolve => {
             if (!gmXmlHttpRequest) return resolve({ text: '', finalUrl: '', headers: '', status: 0 })
             const done = r => resolve({ text: r?.responseText || '', finalUrl: r?.finalUrl || '', headers: r?.responseHeaders || '', status: r?.status || 0 })
@@ -595,6 +640,16 @@
             { key: 'AutoStartDownload', label: 'Auto Start Download on file_id= URLs', type: 'bool', description: 'Automatically start downloads when visiting file download pages (URLs containing file_id=)' },
             { key: 'AutoCloseTab', label: 'Auto-Close Tab After AutoStartDownload', type: 'bool', description: 'Auto-close may be unreliable due to browser permissions.', showIf: () => cfg.AutoStartDownload },
             { key: 'VpnMode', label: 'VPN Mode (Fallback Redirect)', type: 'bool', description: 'If a background request hits Cloudflare etc, redirect your browser directly to the link so you can solve the challenge naturally.' },
+            {
+                key: 'RequestMethod',
+                label: 'Download Request Method',
+                type: 'select',
+                options: [
+                    { value: 'gm', label: 'GM XHR (Default)' },
+                    { value: 'fetch', label: 'Native Fetch (Experimental)' }
+                ],
+                description: "How the script talks to Nexus to resolve download links. Native Fetch uses your browser's own network stack instead of a background request, which may fix Cloudflare-challenge/VPN-related errors for some users. Only applies to nexusmods.com requests."
+            },
             { key: 'SkipRequirements', label: 'Skip Requirements PopUp/Tab', type: 'bool', description: 'Skip the requirements popup/page and proceed directly to download' },
             { key: 'ShowAlertsOnError', label: 'Show Alert Messages on Errors', type: 'bool', description: 'Display error messages as browser popup alerts' },
             { key: 'PlayErrorSound', label: 'Play Error Sound', type: 'bool', description: 'Play an error sound when download errors occur' },
@@ -660,6 +715,9 @@
                     return `<div style="${STYLES.row}display:${display}"><label title="${desc}" style="${STYLES.label}"><span>${setting.label}:</span><input type="number" value="${escapeAttr(cfg[setting.key])}" min="0" step="${step}" data-setting="${setting.key}" style="${STYLES.input}width:120px;"></label></div>`
                 } else if (setting.type === 'text') {
                     return `<div style="${STYLES.row}display:${display}"><label title="${desc}" style="${STYLES.label}flex-direction:column;align-items:stretch;gap:4px;"><span style="font-size:0.9em;color:#aaa;">${setting.label}:</span><input type="text" value="${escapeAttr(cfg[setting.key])}" data-setting="${setting.key}" style="${STYLES.input}width:95%;"></label></div>`
+                } else if (setting.type === 'select') {
+                    const opts = (setting.options || []).map(o => `<option value="${escapeAttr(o.value)}" ${cfg[setting.key] === o.value ? 'selected' : ''}>${escapeAttr(o.label)}</option>`).join('')
+                    return `<div style="${STYLES.row}display:${display}"><label title="${desc}" style="${STYLES.label}"><span>${setting.label}:</span><select data-setting="${setting.key}" style="${STYLES.input}width:220px;">${opts}</select></label></div>`
                 }
                 return ''
             }
