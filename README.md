@@ -49,17 +49,12 @@ No bans have been reported, but use caution and avoid excessive automated downlo
 
 ### Getting blocked by Cloudflare / VPN issues
 
-* **The Symptom:** Downloads get stuck indefinitely on *"Please Wait..."*, fail with a generic network error, or explicitly show a *"cloudflare-challenge"* error.
-* **The Cause:** When you are using a VPN or browsing from regions with heavily throttled routing, Cloudflare often triggers a security check. Because the script attempts to fetch download links quietly in the background to bypass countdowns, it gets blocked by these challenges because there is no way for you to solve them in a background request.
-* **The Solution:** Enable **VPN Mode** in the script settings.
-  
-  **How to enable it:**
-  1. Click your extension manager icon (Violentmonkey/Tampermonkey) while on a Nexus Mods page.
-  2. Click **Settings** to open the NexusNoWait++ menu.
-  3. Check the box for **VPN Mode (Fallback Redirect)**.
-  4. Click **Save & Close**.
+Downloads stuck on *"Please Wait..."*, failing with a generic network error, or showing a *"cloudflare-challenge"* error? Try these in Settings, in order:
 
-  > **How it works:** When VPN Mode is active, if the script detects *any* network block or Cloudflare challenge during a background request, it won't fail. Instead, it will change the button to "Downloading!" and redirect your browser tab directly to the target link. This allows you to solve the Cloudflare check naturally in your browser before the download starts.
+1. **Download Request Method → Native Fetch (Experimental)**
+2. If it is Still failing? Also enable **VPN Mode (Fallback Redirect)**
+
+Both can be on at once. Still stuck after both? Please report it (see below).
 
 ### Script is not running / Grayed out
 
