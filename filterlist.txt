@@ -15,6 +15,7 @@ nexusmods.com##.to-premium-900
 nexusmods.com##.col-span-2 > .text-left
 nexusmods.com##.md\:block.hidden
 nexusmods.com##.border-creator-moderate.border.rounded-lg.block
+!!! https://greasyfork.org/en/scripts/519037-nexus-no-wait/discussions/336021
 nexusmods.com##free-trial-banner
 nexusmods.com##.primary.button
 nexusmods.com##.py-2\.5.px-3.bg-premium-weak.gap-3.justify-between.flex.relative
