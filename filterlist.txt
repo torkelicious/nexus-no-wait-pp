@@ -1,0 +1,42 @@
+! Title: NexusMods Upsells/Annoyances (NNW++)
+! Version: 1.0
+! Homepage: https://github.com/torkelicious/nexus-no-wait-pp
+! Expires: 7 days
+
+! https://www.nexusmods.com
+! Nexus Mods cosmetic filter list for uBlock Origin
+
+!!! Premium upsells
+nexusmods.com##mod-file-download:shadow(#upsell-cards div.border-premium-moderate)
+nexusmods.com##.mfp-ready.mfp-zoom-in.mfp-auto-cursor.mfp-close-btn-in.mfp-wrap
+nexusmods.com##.mfp-ready.mfp-zoom-in.mfp-bg
+nexusmods.com##.sm\:block.p-4.bg-cover
+nexusmods.com##.to-premium-900
+nexusmods.com##.col-span-2 > .text-left
+nexusmods.com##.md\:block.hidden
+nexusmods.com##.border-creator-moderate.border.rounded-lg.block
+nexusmods.com##free-trial-banner
+nexusmods.com##.primary.button
+nexusmods.com##.py-2\.5.px-3.bg-premium-weak.gap-3.justify-between.flex.relative
+nexusmods.com##.md\:flex.py-2.bg-surface-low.border-stroke-subdued.border-b.gap-x-4.justify-center.items-center.hidden
+nexusmods.com##.py-2.bg-surface-low.border-stroke-subdued.border-y.gap-x-4.justify-center.items-center.flex
+nexusmods.com###freeTrialBanner
+nexusmods.com###nonPremiumBanner
+nexusmods.com##.sm\:p-8.p-6.bg-center.bg-size-\[424px_244px\].border-premium-moderate.border.rounded-lg.space-y-8.w-full
+nexusmods.com##[class*="ads-bottom"]
+nexusmods.com##[class*="ads-top"]
+nexusmods.com##[class*="to-premium"]
+nexusmods.com##[class*="from-premium"]
+nexusmods.com##[class*="premium"]
+nexusmods.com###mainContent > div.ads-holder
+nexusmods.com##.bg-nexus-premium-gradient
+
+!!! Instant Gaming affiliate/ads
+nexusmods.com###ig-banner-container
+nexusmods.com##.w-full.h-fit.order-4.xs\:max-w-sm.xs\:w-fit.backdrop-blur-xs.p-2\.5.bg-surface-translucent-low.rounded-sm.gap-2.flex-col.flex
+
+!!! Annoying big Vortex download banner
+nexusmods.com###rj-vortex
+
+!!! Profile menu clutter (premium upsell button)
+nexusmods.com###head > div.rj-right-tray.rj-profile-tray.rj-open > ul > li.user-profile-menu-section-top > a
