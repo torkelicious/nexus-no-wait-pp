@@ -29,26 +29,18 @@ To run this script, you need a modern web browser and a userscript manager.
 - **Restore Mod ID to filenames:** Optionally appends Mod IDs back onto downloaded filenames for easier manual organization.
 - **In-Page Configuration:** Configurable via the "Settings" menu added to your userscript manager while visiting Nexus Mods.
 
+
+⚠ **Use at your own risk. This script may violate Nexus Mods' Terms of Service. While no bans have been reported, use caution and avoid excessive automated downloads to prevent getting rate-limited or flagged.**
+
 ---
 
 ## Annoyance / Upsell Blocker Filter List
 
 > The built-in Upsell Blocker has been deprecated in favor of an adblock filter list.
 
-* [**Click to Install Filter List**](abp:subscribe?location=https%3A%2F%2Fraw.githubusercontent.com%2Ftorkelicious%2Fnexus-no-wait-pp%2Ffilterlist%2Ffilterlist.txt&title=NexusMods%20Upsells%2FAnnoyances%20%28NNW%2B%2B%29)
-* [**View Raw Filter List**](https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/filterlist/filterlist.txt)
+* **[Click here to subscribe to the Filter List](https://subscribe.adblockplus.org/?location=https%3A%2F%2Fraw.githubusercontent.com%2Ftorkelicious%2Fnexus-no-wait-pp%2Ffilterlist%2Ffilterlist.txt&title=Upsell%20Blocker)** 
 
-<details>
-<summary><b>Manual Installation Instructions (If click to install doesn't open)</b></summary>
-
-1. Copy the raw list URL: `https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/filterlist/filterlist.txt`
-2. Open your adblocker settings (e.g., **uBlock Origin Dashboard** > **Filter lists** tab).
-3. Scroll to the bottom, check **Import**, paste the URL into the text box, and click **Apply changes**.
-</details>
-
----
-
-⚠ **Use at your own risk. This script may violate Nexus Mods' Terms of Service. While no bans have been reported, use caution and avoid excessive automated downloads to prevent getting rate-limited or flagged.**
+* **Manual Install:** If the button above doesn't work for your specific adblocker, copy [this raw link](https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/filterlist/filterlist.txt) and paste it into your extension's custom filter lists settings.
 
 ---
 
