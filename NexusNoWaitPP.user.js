@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.2.4
+// @version     2.2.5
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -14,7 +14,6 @@
 // @grant       GM.xmlHttpRequest
 // @grant       GM_xmlhttpRequest
 // @grant       GM_info
-// @grant       GM_addStyle
 // @grant       GM_registerMenuCommand
 // @grant       GM_download
 // @connect     *.nexusmods.com
@@ -38,7 +37,7 @@
         PlayErrorSound: true,
         ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/cf4fdca1cde74a173ac115e95eb1c8ffeb19a4ae/errorsound.mp3',
         HandleArchivedFiles: true,
-        HidePremiumUpsells: false,
+        DownloadButtonColor: false,
         OverrideFileNames: false,
         ForceModManagerDownload: false,
         CloseTabDelay: 2000,
@@ -83,7 +82,6 @@
     const autoFiredIds = new Set()
     let listenersAttached = false,
         errorAudioPlayer = null,
-        stylesInjected = false,
         domObserver = null,
         domUpdateTimeout = null
 
@@ -364,7 +362,7 @@
             btn.dataset.nnwppOrigColor = btn.style.color || ''
         }
         if (txtEl) txtEl.innerText = (sc[state] || sc.error).text
-        btn.style.color = (sc[state] || sc.error).color
+        if (cfg.DownloadButtonColor) btn.style.color = (sc[state] || sc.error).color
     }
 
     function restoreButtonState(btn, delay = 4000) {
@@ -372,7 +370,7 @@
         setTimeout(() => {
             const txtEl = btn.querySelector('span.flex-label, span') || btn
             if (txtEl) txtEl.innerText = btn.dataset.nnwppOrigText
-            btn.style.color = btn.dataset.nnwppOrigColor || ''
+            if (cfg.DownloadButtonColor) btn.style.color = btn.dataset.nnwppOrigColor || ''
         }, delay)
     }
 
@@ -576,15 +574,6 @@
         }
     }
 
-    function upsellBlocker() {
-        if (!cfg.HidePremiumUpsells) return
-        if (!stylesInjected) {
-            GM_addStyle(['#nonPremiumBanner', '#freeTrialBanner', '#ig-banner-container', '#rj-vortex', '[class*="ads-bottom"]', '[class*="ads-top"]', '[class*="to-premium"]', '[class*="from-premium"]', '[class*="premium"]', '#mainContent > div.ads-holder', '#head > div.rj-right-tray.rj-profile-tray.rj-open > ul > li.user-profile-menu-section-top > a'].map(s => `${s}{display:none!important}`).join('\n'))
-            stylesInjected = true
-        }
-        document.querySelector('.bg-nexus-premium-gradient')?.remove()
-    }
-
     function archivedFileHandler() {
         if (!cfg.HandleArchivedFiles || !isModPage()) return
         const url = location.href
@@ -653,10 +642,10 @@
             { key: 'SkipRequirements', label: 'Skip Requirements PopUp/Tab', type: 'bool', description: 'Skip the requirements popup/page and proceed directly to download' },
             { key: 'ShowAlertsOnError', label: 'Show Alert Messages on Errors', type: 'bool', description: 'Display error messages as browser popup alerts' },
             { key: 'PlayErrorSound', label: 'Play Error Sound', type: 'bool', description: 'Play an error sound when download errors occur' },
-            { key: 'HidePremiumUpsells', label: 'Hide Premium Upsells & misc Annoyances (experimental)', type: 'bool', description: 'Hide premium upgrade banners, trial offers, and other annoyances on the site (experimental). You are probably better off using an adblocker.' },
             { key: 'OverrideFileNames', label: 'Append Mod ID to Filenames (Manual Downloads)', type: 'bool', description: 'Restores the Mod ID to downloaded files. Note: Your browser may prompt you for download permissions the first time, and it may take longer to initate downloads.' },
             { key: 'ForceModManagerDownload', label: 'Generate mod manager download buttons for manual-only downloads', type: 'bool', description: "Inject mod-manager download buttons on files that don't have any." },
             { key: 'HandleArchivedFiles', label: 'Generate download buttons for Archived Files', type: 'bool', description: 'Enable handling of archived files.' },
+            { key: 'DownloadButtonColor', label: 'Color Download Buttons by Status', type: 'bool', description: 'Tint the download button orange/green/red to reflect waiting/downloading/error status. Disable to keep the native button color and only change the text.' },
             { key: 'RequestTimeout', label: 'Request Timeout', type: 'number', description: 'Maximum time to wait for server responses before timing out (in milliseconds)' },
             { key: 'CloseTabDelay', label: 'Auto-Close Tab Delay', type: 'number', description: 'Delay before automatically closing the tab after download starts (in milliseconds)', showIf: () => cfg.AutoStartDownload && cfg.AutoCloseTab },
             { key: 'ErrorSoundUrl', label: 'Error Sound URL', type: 'text', description: 'URL of the custom sound file to play for error alerts', showIf: () => cfg.PlayErrorSound }
@@ -778,7 +767,6 @@
 
     // initialization
     function handleDomUpdates() {
-        upsellBlocker()
         archivedFileHandler()
         forceModManagerHandler()
         setupSlowDownloadIntercept()
