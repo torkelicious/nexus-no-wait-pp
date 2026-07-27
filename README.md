@@ -1,8 +1,11 @@
+
+[GreasyFork Page](https://greasyfork.org/en/scripts/519037-nexus-no-wait) | [Direct Install (GreasyFork)](https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.user.js) | [Direct Install (GitHub)](https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/NexusNoWaitPP.user.js)
+
+---
+
 # Nexus No Wait ++
 
 A userscript for Nexus Mods that skips download countdowns, bypasses redirects, auto-downloads files, and adds quality-of-life features.
-
-[GreasyFork Page](https://greasyfork.org/en/scripts/519037-nexus-no-wait) | [Direct Install (GreasyFork)](https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.user.js) | [Direct Install (GitHub)](https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/NexusNoWaitPP.user.js)
 
 ---
 
@@ -10,7 +13,7 @@ A userscript for Nexus Mods that skips download countdowns, bypasses redirects, 
 
 To run this script, you need a modern web browser and a userscript manager. 
 * **Recommended Managers:** [Violentmonkey](https://violentmonkey.github.io/) or [Tampermonkey](https://www.tampermonkey.net/)
-* **Supported Browsers:** Chrome, Firefox, Edge, Brave, Helium, etc.
+* **A Web browser:** Chrome, Firefox, Edge, Brave, Helium, etc.
 
 > **Note:** First and foremost tested on **Helium browser** with **Violentmonkey**, and on **Firefox** for major releases.
 
