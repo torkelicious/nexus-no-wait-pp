@@ -92,6 +92,7 @@ If nothing above fixes the problem:
 *(When reporting an issue, please include your browser, userscript manager, and any error messages from your browser's console)*
 
 >*Feature requests are also welcome.*
+
 ---
 
 *Originally based on StrangeT's Nexus No Wait.*
