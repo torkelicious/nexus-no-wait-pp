@@ -38,9 +38,9 @@ To run this script, you need a modern web browser and a userscript manager.
 
 > The built-in Upsell Blocker has been deprecated in favor of an adblock filter list.
 
-* **[Click here to subscribe to the Filter List](https://subscribe.adblockplus.org/?location=https%3A%2F%2Fraw.githubusercontent.com%2Ftorkelicious%2Fnexus-no-wait-pp%2Ffilterlist%2Ffilterlist.txt&title=Upsell%20Blocker)** 
+* **[Click here to subscribe to the Filter List](https://subscribe.adblockplus.org/?location=https%3A%2F%2Fraw.githubusercontent.com%2Ftorkelicious%2Fnexus-no-wait-pp%2Fmain%2Ffilterlist.txt&title=Upsell%20Blocker)** 
 
-* **Manual Install:** If the button above doesn't work for your specific adblocker, copy [this raw link](https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/filterlist/filterlist.txt) and paste it into your extension's custom filter lists settings.
+* **Manual Install:** If the button above doesn't work for your specific adblocker, copy [this raw link](https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/main/filterlist.txt) and paste it into your extension's custom filter lists settings.
 
 ---
 
