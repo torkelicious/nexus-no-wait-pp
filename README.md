@@ -1,3 +1,5 @@
+ > ⚠️ **Unofficial, possibly dangerous modified copies of this script are being distributed on the Chrome Web Store and Edge Add-ons.** [Read the full notice here](https://github.com/torkelicious/nexus-no-wait-pp/issues/21).
+ ---
 
 [GreasyFork Page](https://greasyfork.org/en/scripts/519037-nexus-no-wait) | [Direct Install (GreasyFork)](https://update.greasyfork.org/scripts/519037/Nexus%20No%20Wait%20%2B%2B.user.js) | [Direct Install (GitHub)](https://github.com/torkelicious/nexus-no-wait-pp/raw/refs/heads/main/NexusNoWaitPP.user.js)
 
