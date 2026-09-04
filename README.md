@@ -48,6 +48,9 @@ To run this script, you need a modern web browser and a userscript manager.
 * **Manual Install:** If the button above doesn't work for your specific adblocker, copy [this raw link](https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/main/filterlist.txt) and paste it into your extension's custom filter lists settings.
 
 ---
+This is a **userscript**, If you are looking for a standalone browser extension I would recommend the **["NexusMods Bypass" extension](https://github.com/thomasthanos/nexusmods-bypass)**.
+> The file `nnw.js` in the ["NexusMods Bypass" extension](https://github.com/thomasthanos/nexusmods-bypass) is based on this project and is licensed under GPL-3.0-or-later with attribution, as agreed with the project's maintainer. This does not require the rest of that extension to be GPL-licensed.
+---
 
 ## Troubleshooting
 
