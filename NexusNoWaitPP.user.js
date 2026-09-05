@@ -210,14 +210,20 @@
         }
         const sectionId = document.getElementById('section')?.dataset?.gameId
         if (sectionId) return sectionId
-        const nodeIds = [...new Set(Array.from(document.querySelectorAll('[data-game-id], [game-id]')).map(n => n.dataset?.gameId || n.getAttribute('game-id')).filter(Boolean))]
+        const nodeIds = [
+            ...new Set(
+                Array.from(document.querySelectorAll('[data-game-id], [game-id]'))
+                    .map(n => n.dataset?.gameId || n.getAttribute('game-id'))
+                    .filter(Boolean)
+            )
+        ]
         if (nodeIds.length === 1) return nodeIds[0]
-        if (nodeIds.length > 1) return getGameDomain()
+        if (nodeIds.length > 1) return getGameDomain() || location.pathname.split('/')[1] || ''
         for (const script of document.querySelectorAll('script')) {
             const m = script.textContent.match(/game_id\s*:\s*(\d+)/) || script.textContent.match(/gameId\s*:\s*(\d+)/)
             if (m) return m[1]
         }
-        return getGameDomain()
+        return getGameDomain() || location.pathname.split('/')[1] || ''
     }
 
     function getGameDomain(url = location.href) {
@@ -244,11 +250,7 @@
             const url = j?.downloadUrl || j?.url || j?.vortexDownloadUrl || j?.nmmDownloadUrl || j?.data?.url
             if (url) return { url: decodeDownloadUrlValue(url) }
         } catch (e) {}
-        const patterns = [
-            /id=["']dl_link["'][^>]*value=["']([^"']+)["']/i,
-            /data-download-url=["']([^"']+)["']/i,
-            /const\s+downloadUrl\s*=\s*["']([^"']+)["']/i
-        ]
+        const patterns = [/id=["']dl_link["'][^>]*value=["']([^"']+)["']/i, /data-download-url=["']([^"']+)["']/i, /const\s+downloadUrl\s*=\s*["']([^"']+)["']/i]
         for (const re of patterns) {
             const m = raw.match(re)
             if (m) return { url: decodeDownloadUrlValue(m[1]) }
@@ -355,10 +357,10 @@
 
     async function normalizeDownloadUrl(url, isNMM) {
         if (!url || url.startsWith('nxm://')) return url
-        if (url.includes('nexusmods.com') && (url.includes('file_id=') || /\/api\/files\//i.test(url))) {
+        if (url.includes('nexusmods.com') && url.includes('file_id=')) {
             try {
                 const parsed = new URL(url, location.href)
-                const fileId = parsed.searchParams.get('file_id') || parsed.searchParams.get('id') || parsed.pathname.match(/\/api\/files\/(\d+)/)?.[1]
+                const fileId = parsed.searchParams.get('file_id')
                 if (fileId) return (await getDownloadUrl({ fileId, gameId: getGameId(), isNMM, href: url }))?.url || url
             } catch (e) {}
         }
