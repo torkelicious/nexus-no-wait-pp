@@ -204,34 +204,31 @@
     }
 
     function getGameId(el = null) {
+        const numeric = v => (v && /^\d+$/.test(String(v)) ? String(v) : null)
+        // clicked host container
         while (el) {
-            if (['MOD-DOWNLOAD-BUTTONS', 'MOD-FILE-DOWNLOAD'].includes(el.tagName) && el.getAttribute('game-id')) return el.getAttribute('game-id')
+            if (['MOD-DOWNLOAD-BUTTONS', 'MOD-FILE-DOWNLOAD'].includes(el.tagName)) {
+                const id = numeric(el.getAttribute('game-id'))
+                if (id) return id
+            }
             el = el.parentNode || (el instanceof ShadowRoot ? el.host : null)
         }
-        const sectionId = document.getElementById('section')?.dataset?.gameId
+        const sectionId = numeric(document.getElementById('section')?.dataset?.gameId)
         if (sectionId) return sectionId
         const nodeIds = [
             ...new Set(
                 Array.from(document.querySelectorAll('[data-game-id], [game-id]'))
-                    .map(n => n.dataset?.gameId || n.getAttribute('game-id'))
+                    .map(n => numeric(n.dataset?.gameId || n.getAttribute('game-id')))
                     .filter(Boolean)
             )
         ]
         if (nodeIds.length === 1) return nodeIds[0]
-        if (nodeIds.length > 1) return getGameDomain() || location.pathname.split('/')[1] || ''
         for (const script of document.querySelectorAll('script')) {
-            const m = script.textContent.match(/game_id\s*:\s*(\d+)/) || script.textContent.match(/gameId\s*:\s*(\d+)/)
+            const m = script.textContent.match(/game_id\s*[:=]\s*["']?(\d+)/) || script.textContent.match(/gameId\s*[:=]\s*["']?(\d+)/)
             if (m) return m[1]
         }
-        return getGameDomain() || location.pathname.split('/')[1] || ''
-    }
-
-    function getGameDomain(url = location.href) {
-        try {
-            return new URL(url, location.href).pathname.match(/^\/([a-z0-9][a-z0-9-]{0,63})\/mods\/\d+/i)?.[1] || ''
-        } catch {
-            return ''
-        }
+        Logger.warn('getGameId: no numeric game id found on page')
+        return null
     }
 
     function decodeDownloadUrlValue(value) {
@@ -267,6 +264,25 @@
         if (!m || !m[0].includes('?')) return null
         const p = new URLSearchParams(m[0].slice(m[0].indexOf('?') + 1))
         return p.has('key') && p.has('expires') && p.has('user_id') ? m[0] : null
+    }
+
+    function isUsableDownloadUrl(url) {
+        if (!url) return false
+        const s = String(url)
+        if (s.startsWith('nxm://')) return !!parseDownloadLink(s)
+        let u
+        try {
+            u = new URL(s, location.href)
+        } catch {
+            return false
+        }
+        if (!/^https?:$/.test(u.protocol)) return false
+        if (/(^|\.)nexus-cdn\.com$/i.test(u.hostname)) return true
+        if (/(^|\.)nexusmods\.com$/i.test(u.hostname)) {
+            if (/^(filedelivery|download|cdn|dl)\./i.test(u.hostname)) return true
+            return u.pathname.startsWith('/api/files/') || u.searchParams.has('file_id') || isRequirementsUrl(s)
+        }
+        return false
     }
 
     function getFilenameFromHead(h) {
@@ -318,13 +334,24 @@
         if (!fileId && !href) return { url: null, error: 'Missing fileId' }
         if (href?.startsWith('nxm://')) return { url: href }
 
-        const extract = r => r.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i)?.[1] || parseDownloadURLFromResponse(r.text)?.url || parseDownloadLink(r.text) || parseDownloadLink(r.finalUrl)
+        const extract = r => {
+            const candidates = [r.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i)?.[1], parseDownloadURLFromResponse(r.text)?.url, parseDownloadLink(r.text), parseDownloadLink(r.finalUrl)]
+            const link = candidates.find(c => isUsableDownloadUrl(c)) || null
+            if (!link && candidates.some(Boolean)) logEvent('warn', 'download:link-rejected', { candidates: candidates.filter(Boolean) })
+            return link
+        }
 
         if (href?.includes('/api/files/')) {
             const target = isNMM ? appendNmmParam(href) : href
+            let absoluteTarget = ''
+            try {
+                absoluteTarget = new URL(target, location.href).href
+            } catch (e) {}
             const res = await gmRequest(target, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
             if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge', blockedUrl: target }
-            const link = (res.finalUrl && res.finalUrl !== target ? res.finalUrl : null) || extract(res)
+            // a followed redirect is only trusted if it points at a download location
+            const redirect = res.finalUrl && res.finalUrl !== target && res.finalUrl !== absoluteTarget ? res.finalUrl : null
+            const link = (redirect && isUsableDownloadUrl(redirect) ? redirect : null) || extract(res)
             if (link) return { url: link }
         }
 
@@ -342,10 +369,15 @@
 
         if (fileId) {
             const spoof = `https://www.nexusmods.com${location.pathname}?tab=files&file_id=${fileId}`
-            const res = await gmRequest('/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl', { method: 'POST', data: `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || getGameDomain(href || spoof))}${isNMM ? '&nmm=1' : ''}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest', Origin: 'https://www.nexusmods.com', Referer: href || spoof } })
-            if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge', blockedUrl: href || spoof }
-            const link = extract(res)
-            if (link) return { url: link }
+            if (gameId) {
+                logEvent('debug', 'download:generate', { fileId, gameId, isNMM })
+                const res = await gmRequest('/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl', { method: 'POST', data: `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId)}${isNMM ? '&nmm=1' : ''}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest', Origin: 'https://www.nexusmods.com', Referer: href || spoof } })
+                if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge', blockedUrl: href || spoof }
+                const link = extract(res)
+                if (link) return { url: link }
+            } else {
+                logEvent('warn', 'download:generate-skipped', { fileId, reason: 'no numeric game_id found on page' })
+            }
 
             const pageRes = await gmRequest(href || spoof)
             if (isCloudflareChallenge(pageRes)) return { url: null, error: 'cloudflare-challenge', blockedUrl: href || spoof }
