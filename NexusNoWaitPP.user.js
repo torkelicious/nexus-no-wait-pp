@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.2.5
+// @version     2.2.6
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -208,23 +208,52 @@
             if (['MOD-DOWNLOAD-BUTTONS', 'MOD-FILE-DOWNLOAD'].includes(el.tagName) && el.getAttribute('game-id')) return el.getAttribute('game-id')
             el = el.parentNode || (el instanceof ShadowRoot ? el.host : null)
         }
-        const dataEl = document.querySelector('[data-game-id], [game-id]')
-        if (dataEl) return dataEl.dataset.gameId || dataEl.getAttribute('game-id')
+        const sectionId = document.getElementById('section')?.dataset?.gameId
+        if (sectionId) return sectionId
+        const nodeIds = [...new Set(Array.from(document.querySelectorAll('[data-game-id], [game-id]')).map(n => n.dataset?.gameId || n.getAttribute('game-id')).filter(Boolean))]
+        if (nodeIds.length === 1) return nodeIds[0]
+        if (nodeIds.length > 1) return getGameDomain()
         for (const script of document.querySelectorAll('script')) {
             const m = script.textContent.match(/game_id\s*:\s*(\d+)/) || script.textContent.match(/gameId\s*:\s*(\d+)/)
             if (m) return m[1]
         }
-        return document.getElementById('section')?.dataset?.gameId || location.pathname.split('/')[1] || ''
+        return getGameDomain()
+    }
+
+    function getGameDomain(url = location.href) {
+        try {
+            return new URL(url, location.href).pathname.match(/^\/([a-z0-9][a-z0-9-]{0,63})\/mods\/\d+/i)?.[1] || ''
+        } catch {
+            return ''
+        }
+    }
+
+    function decodeDownloadUrlValue(value) {
+        return String(value || '')
+            .replace(/\\\//g, '/')
+            .replace(/&amp;/g, '&')
+            .replace(/\\u0026/g, '&')
+            .trim()
     }
 
     function parseDownloadURLFromResponse(text) {
         if (!text) return null
+        const raw = String(text)
         try {
-            const j = JSON.parse(String(text))
-            if (j?.url) return { url: j.url.replace(/&amp;/g, '&') }
+            const j = JSON.parse(raw)
+            const url = j?.downloadUrl || j?.url || j?.vortexDownloadUrl || j?.nmmDownloadUrl || j?.data?.url
+            if (url) return { url: decodeDownloadUrlValue(url) }
         } catch (e) {}
-        const m = String(text).match(/id=["']dl_link["'][^>]*value=["']([^"']+)["']/i)
-        return m ? { url: m[1].replace(/&amp;/g, '&') } : null
+        const patterns = [
+            /id=["']dl_link["'][^>]*value=["']([^"']+)["']/i,
+            /data-download-url=["']([^"']+)["']/i,
+            /const\s+downloadUrl\s*=\s*["']([^"']+)["']/i
+        ]
+        for (const re of patterns) {
+            const m = raw.match(re)
+            if (m) return { url: decodeDownloadUrlValue(m[1]) }
+        }
+        return null
     }
 
     function parseDownloadLink(text) {
@@ -311,19 +340,25 @@
 
         if (fileId) {
             const spoof = `https://www.nexusmods.com${location.pathname}?tab=files&file_id=${fileId}`
-            const res = await gmRequest('/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl', { method: 'POST', data: `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || '')}${isNMM ? '&nmm=1' : ''}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest', Origin: 'https://www.nexusmods.com', Referer: href || spoof } })
+            const res = await gmRequest('/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl', { method: 'POST', data: `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId || getGameDomain(href || spoof))}${isNMM ? '&nmm=1' : ''}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest', Origin: 'https://www.nexusmods.com', Referer: href || spoof } })
             if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge', blockedUrl: href || spoof }
-            const link = parseDownloadURLFromResponse(res.text)?.url
+            const link = extract(res)
             if (link) return { url: link }
+
+            const pageRes = await gmRequest(href || spoof)
+            if (isCloudflareChallenge(pageRes)) return { url: null, error: 'cloudflare-challenge', blockedUrl: href || spoof }
+            const pageLink = extract(pageRes)
+            if (pageLink) return { url: pageLink }
         }
         return { url: null, error: 'Could not resolve file link (are you logged in?)' }
     }
 
     async function normalizeDownloadUrl(url, isNMM) {
         if (!url || url.startsWith('nxm://')) return url
-        if (url.includes('nexusmods.com') && url.includes('file_id=')) {
+        if (url.includes('nexusmods.com') && (url.includes('file_id=') || /\/api\/files\//i.test(url))) {
             try {
-                const fileId = new URL(url, location.href).searchParams.get('file_id')
+                const parsed = new URL(url, location.href)
+                const fileId = parsed.searchParams.get('file_id') || parsed.searchParams.get('id') || parsed.pathname.match(/\/api\/files\/(\d+)/)?.[1]
                 if (fileId) return (await getDownloadUrl({ fileId, gameId: getGameId(), isNMM, href: url }))?.url || url
             } catch (e) {}
         }
@@ -557,8 +592,14 @@
     function setupSlowDownloadIntercept() {
         const fid = new URLSearchParams(location.search).get('file_id')
         if (!fid) return
-        const slowBtn = document.querySelector('mod-file-download')?.shadowRoot?.querySelector('button')
-        if (!slowBtn || !(slowBtn.textContent || '').toLowerCase().includes('slow download') || attachedSlowDl.has(slowBtn)) return
+        let slowBtn = null
+        for (const host of document.querySelectorAll('mod-file-download')) {
+            const root = host.shadowRoot
+            if (!root) continue
+            slowBtn = root.querySelector('#slowDownloadButton') || [...root.querySelectorAll('button')].find(b => (b.textContent || '').toLowerCase().includes('slow download'))
+            if (slowBtn) break
+        }
+        if (!slowBtn || attachedSlowDl.has(slowBtn)) return
         attachedSlowDl.add(slowBtn)
 
         const isNMM = isNMMDownload(slowBtn, location.search)
@@ -588,9 +629,10 @@
             }
         }
         if (!url.includes('category=archived')) return
-        document.querySelectorAll('.file-expander-header').forEach((h, i) => {
-            const box = document.querySelectorAll('.accordion-downloads')[i],
-                fileId = h?.dataset?.id
+        document.querySelectorAll('.file-expander-header').forEach(h => {
+            const fileId = h?.dataset?.id
+            const sibling = h.nextElementSibling
+            const box = sibling?.classList?.contains('accordion-downloads') ? sibling : h.parentElement?.querySelector('.accordion-downloads')
             if (!fileId || !box || handledArchive.has(box) || box.querySelector('p') || h.querySelector('.icon-tickunsafe')) return
             handledArchive.add(box)
             const safeBase = escapeAttr(`${location.origin}${location.pathname}`)
