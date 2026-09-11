@@ -28,22 +28,7 @@
     // config / state
     const CONFIG_KEY = 'NexusNoWaitPP'
     const AUDIO_CACHE_KEY = 'NexusNoWaitPP_ErrorSoundCache'
-    const DEFAULTS = {
-        AutoStartDownload: true,
-        AutoCloseTab: true,
-        VpnMode: false,
-        SkipRequirements: true,
-        ShowAlertsOnError: true,
-        PlayErrorSound: true,
-        ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/cf4fdca1cde74a173ac115e95eb1c8ffeb19a4ae/errorsound.mp3',
-        HandleArchivedFiles: true,
-        DownloadButtonColor: false,
-        OverrideFileNames: false,
-        ForceModManagerDownload: false,
-        CloseTabDelay: 2000,
-        RequestTimeout: 30000,
-        RequestMethod: 'gm'
-    }
+    const DEFAULTS = { AutoStartDownload: true, AutoCloseTab: true, VpnMode: false, SkipRequirements: true, ShowAlertsOnError: true, PlayErrorSound: true, ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/cf4fdca1cde74a173ac115e95eb1c8ffeb19a4ae/errorsound.mp3', HandleArchivedFiles: true, DownloadButtonColor: false, OverrideFileNames: false, ForceModManagerDownload: false, CloseTabDelay: 2000, RequestTimeout: 30000, RequestMethod: 'gm' }
 
     function loadConfig() {
         try {
