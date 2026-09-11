@@ -89,14 +89,6 @@
     const gmXmlHttpRequest = typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest.bind(GM) : typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : null
     if (!gmXmlHttpRequest) Logger.error('No GM XHR API available. Script may not function correctly.')
 
-    const isSameOrigin = url => {
-        try {
-            return new URL(url, location.href).hostname === location.hostname
-        } catch {
-            return false
-        }
-    }
-
     // native fetch runs in-page
     // only usable same-origin since GitHub assets etc would hit CORS
     async function fetchRequest(url, opts = {}) {
@@ -118,7 +110,11 @@
     }
 
     function gmRequest(url, opts = {}) {
-        if (cfg.RequestMethod === 'fetch' && isSameOrigin(url)) return fetchRequest(url, opts)
+        if (cfg.RequestMethod === 'fetch') {
+            try {
+                if (new URL(url, location.href).hostname === location.hostname) return fetchRequest(url, opts)
+            } catch {}
+        }
         return new Promise(resolve => {
             if (!gmXmlHttpRequest) return resolve({ text: '', finalUrl: '', headers: '', status: 0 })
             const done = r => resolve({ text: r?.responseText || '', finalUrl: r?.finalUrl || '', headers: r?.responseHeaders || '', status: r?.status || 0 })
@@ -204,27 +200,23 @@
     }
 
     function getGameId(el = null) {
-        const numeric = v => (v && /^\d+$/.test(String(v)) ? String(v) : null)
-        // clicked host container
-        while (el) {
-            if (['MOD-DOWNLOAD-BUTTONS', 'MOD-FILE-DOWNLOAD'].includes(el.tagName)) {
-                const id = numeric(el.getAttribute('game-id'))
+        const numeric = v => (/^\d+$/.test(String(v ?? '')) ? String(v) : null)
+        // nearest clicked host container
+        for (let n = el; n; n = n instanceof ShadowRoot ? n.host : n.parentNode) {
+            if (n.tagName === 'MOD-DOWNLOAD-BUTTONS' || n.tagName === 'MOD-FILE-DOWNLOAD') {
+                const id = numeric(n.getAttribute('game-id'))
                 if (id) return id
             }
-            el = el.parentNode || (el instanceof ShadowRoot ? el.host : null)
         }
+        // page section container
         const sectionId = numeric(document.getElementById('section')?.dataset?.gameId)
         if (sectionId) return sectionId
-        const nodeIds = [
-            ...new Set(
-                Array.from(document.querySelectorAll('[data-game-id], [game-id]'))
-                    .map(n => numeric(n.dataset?.gameId || n.getAttribute('game-id')))
-                    .filter(Boolean)
-            )
-        ]
-        if (nodeIds.length === 1) return nodeIds[0]
+        // one unique numeric game id anywhere in the DOM
+        const ids = [...new Set(Array.from(document.querySelectorAll('[data-game-id], [game-id]'), n => numeric(n.dataset?.gameId || n.getAttribute('game-id'))).filter(Boolean))]
+        if (ids.length === 1) return ids[0]
+        // inline scripts
         for (const script of document.querySelectorAll('script')) {
-            const m = script.textContent.match(/game_id\s*[:=]\s*["']?(\d+)/) || script.textContent.match(/gameId\s*[:=]\s*["']?(\d+)/)
+            const m = script.textContent.match(/(?:game_id|gameId)\s*[:=]\s*["']?(\d+)/)
             if (m) return m[1]
         }
         Logger.warn('getGameId: no numeric game id found on page')
@@ -234,8 +226,7 @@
     function decodeDownloadUrlValue(value) {
         return String(value || '')
             .replace(/\\\//g, '/')
-            .replace(/&amp;/g, '&')
-            .replace(/\\u0026/g, '&')
+            .replace(/&amp;|\\u0026/g, '&')
             .trim()
     }
 
@@ -246,9 +237,8 @@
             const j = JSON.parse(raw)
             const url = j?.downloadUrl || j?.url || j?.vortexDownloadUrl || j?.nmmDownloadUrl || j?.data?.url
             if (url) return { url: decodeDownloadUrlValue(url) }
-        } catch (e) {}
-        const patterns = [/id=["']dl_link["'][^>]*value=["']([^"']+)["']/i, /data-download-url=["']([^"']+)["']/i, /const\s+downloadUrl\s*=\s*["']([^"']+)["']/i]
-        for (const re of patterns) {
+        } catch {}
+        for (const re of [/id=["']dl_link["'][^>]*value=["']([^"']+)["']/i, /data-download-url=["']([^"']+)["']/i, /const\s+downloadUrl\s*=\s*["']([^"']+)["']/i]) {
             const m = raw.match(re)
             if (m) return { url: decodeDownloadUrlValue(m[1]) }
         }
@@ -276,12 +266,10 @@
         } catch {
             return false
         }
-        if (!/^https?:$/.test(u.protocol)) return false
-        if (/(^|\.)nexus-cdn\.com$/i.test(u.hostname)) return true
-        if (/(^|\.)nexusmods\.com$/i.test(u.hostname)) {
-            if (/^(filedelivery|download|cdn|dl)\./i.test(u.hostname)) return true
-            return u.pathname.startsWith('/api/files/') || u.searchParams.has('file_id') || isRequirementsUrl(s)
-        }
+        if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
+        const h = u.hostname
+        if (/(^|\.)nexus-cdn\.com$/.test(h)) return true
+        if (/(^|\.)nexusmods\.com$/.test(h)) return /^(filedelivery|download|cdn|dl)\./.test(h) || u.pathname.startsWith('/api/files/') || u.searchParams.has('file_id') || isRequirementsUrl(s)
         return false
     }
 
@@ -336,22 +324,21 @@
 
         const extract = r => {
             const candidates = [r.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i)?.[1], parseDownloadURLFromResponse(r.text)?.url, parseDownloadLink(r.text), parseDownloadLink(r.finalUrl)]
-            const link = candidates.find(c => isUsableDownloadUrl(c)) || null
-            if (!link && candidates.some(Boolean)) logEvent('warn', 'download:link-rejected', { candidates: candidates.filter(Boolean) })
+            const link = candidates.find(isUsableDownloadUrl) || null
+            if (!link && candidates.some(Boolean)) logEvent('debug', 'download:link-rejected', { candidates: candidates.filter(Boolean) })
             return link
         }
 
         if (href?.includes('/api/files/')) {
             const target = isNMM ? appendNmmParam(href) : href
-            let absoluteTarget = ''
-            try {
-                absoluteTarget = new URL(target, location.href).href
-            } catch (e) {}
             const res = await gmRequest(target, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
             if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge', blockedUrl: target }
             // a followed redirect is only trusted if it points at a download location
-            const redirect = res.finalUrl && res.finalUrl !== target && res.finalUrl !== absoluteTarget ? res.finalUrl : null
-            const link = (redirect && isUsableDownloadUrl(redirect) ? redirect : null) || extract(res)
+            let absolute = null
+            try {
+                absolute = new URL(target, location.href).href
+            } catch {}
+            const link = (res.finalUrl !== target && res.finalUrl !== absolute && isUsableDownloadUrl(res.finalUrl) ? res.finalUrl : null) || extract(res)
             if (link) return { url: link }
         }
 
@@ -391,10 +378,9 @@
         if (!url || url.startsWith('nxm://')) return url
         if (url.includes('nexusmods.com') && url.includes('file_id=')) {
             try {
-                const parsed = new URL(url, location.href)
-                const fileId = parsed.searchParams.get('file_id')
+                const fileId = new URL(url, location.href).searchParams.get('file_id')
                 if (fileId) return (await getDownloadUrl({ fileId, gameId: getGameId(), isNMM, href: url }))?.url || url
-            } catch (e) {}
+            } catch {}
         }
         return url
     }
@@ -412,7 +398,8 @@
                         .replace(/&#34;/g, '"')
                     if (!u.includes('downloadUrl')) continue
                     const fd = JSON.parse(u)
-                    if (isNMM ? fd.vortexDownloadUrl || fd.downloadUrl : fd.downloadUrl) return isNMM ? fd.vortexDownloadUrl || fd.downloadUrl : fd.downloadUrl
+                    const dl = isNMM ? fd.vortexDownloadUrl || fd.downloadUrl : fd.downloadUrl
+                    if (dl) return dl
                 } catch (e) {}
             }
             return res.text.match(/https?:\/\/[a-zA-Z0-9-]+\.nexus-cdn\.com[^"']+/i)?.[0].replace(/&amp;/g, '&') || null
