@@ -519,8 +519,9 @@
 
     function extractFileId(href) {
         try {
-            const u = href.startsWith('nxm://') ? new URLSearchParams(href.substring(href.indexOf('?'))) : new URL(href, location.href).searchParams
-            return u.get('id') || u.get('file_id') || new URL(href, location.href).pathname.match(/\/api\/files\/(\d+)/)?.[1] || null
+            if (href.startsWith('nxm://')) return new URLSearchParams(href.slice(href.indexOf('?') + 1)).get('id') || null
+            const u = new URL(href, location.href)
+            return u.searchParams.get('id') || u.searchParams.get('file_id') || u.pathname.match(/\/api\/files\/(\d+)/)?.[1] || null
         } catch {
             return null
         }
