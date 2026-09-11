@@ -270,6 +270,7 @@
         const h = u.hostname
         if (/(^|\.)nexus-cdn\.com$/.test(h)) return true
         if (/(^|\.)nexusmods\.com$/.test(h)) return /^(filedelivery|download|cdn|dl)\./.test(h) || u.pathname.startsWith('/api/files/') || u.searchParams.has('file_id') || isRequirementsUrl(s)
+        logEvent('debug', 'url:rejected', { url: s })
         return false
     }
 
