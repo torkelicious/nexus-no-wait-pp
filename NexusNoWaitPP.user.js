@@ -652,12 +652,30 @@
         if (!url.includes('category=archived')) return
         document.querySelectorAll('.file-expander-header').forEach(h => {
             const fileId = h?.dataset?.id
-            const sibling = h.nextElementSibling
-            const box = sibling?.classList?.contains('accordion-downloads') ? sibling : h.parentElement?.querySelector('.accordion-downloads')
-            if (!fileId || !box || handledArchive.has(box) || box.querySelector('p') || h.querySelector('.icon-tickunsafe')) return
-            handledArchive.add(box)
+            if (!fileId) return
+            // nearest following sibling box without crossing into the next file
+            let box = null
+            for (let n = h.nextElementSibling; n && !n.classList?.contains('file-expander-header'); n = n.nextElementSibling) {
+                if (n.classList?.contains('accordion-downloads')) {
+                    box = n
+                    break
+                }
+                if (!n.querySelector?.('.file-expander-header')) {
+                    const nested = n.querySelector?.('.accordion-downloads')
+                    if (nested) {
+                        box = nested
+                        break
+                    }
+                }
+            }
+            // grouped markup
+            if (!box && h.parentElement && h.parentElement.querySelectorAll(':scope > .file-expander-header').length === 1) {
+                box = h.parentElement.querySelector('.accordion-downloads')
+            }
+            if (!box || box.querySelector('p') || h.querySelector('.icon-tickunsafe')) return
+            if (box.querySelector('a[data-nnwpp-archived]')) return // already injected
             const safeBase = escapeAttr(`${location.origin}${location.pathname}`)
-            box.innerHTML = `<a class="btn inline-flex" href="${safeBase}?tab=files&file_id=${fileId}&nmm=1"><span class="flex-label">Mod manager download</span></a> <a class="btn inline-flex" href="${safeBase}?tab=files&file_id=${fileId}"><span class="flex-label">Manual download</span></a>`
+            box.innerHTML = `<a data-nnwpp-archived class="btn inline-flex" href="${safeBase}?tab=files&file_id=${fileId}&nmm=1"><span class="flex-label">Mod manager download</span></a> <a data-nnwpp-archived class="btn inline-flex" href="${safeBase}?tab=files&file_id=${fileId}"><span class="flex-label">Manual download</span></a>`
         })
     }
 
