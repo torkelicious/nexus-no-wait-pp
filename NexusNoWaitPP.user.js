@@ -320,7 +320,7 @@
     // download resolution
     async function getDownloadUrl({ fileId, gameId, isNMM, href }) {
         if (!fileId && !href) return { url: null, error: 'Missing fileId' }
-        if (href?.startsWith('nxm://')) return { url: href }
+        if (href?.startsWith('nxm://')) return parseDownloadLink(href) ? { url: href } : { url: null, error: 'Invalid nxm link' }
 
         const extract = r => {
             const candidates = [r.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i)?.[1], parseDownloadURLFromResponse(r.text)?.url, parseDownloadLink(r.text), parseDownloadLink(r.finalUrl)]
@@ -356,7 +356,7 @@
 
         if (fileId) {
             const spoof = `https://www.nexusmods.com${location.pathname}?tab=files&file_id=${fileId}`
-            if (gameId) {
+            if (gameId && /^\d+$/.test(String(gameId))) {
                 logEvent('debug', 'download:generate', { fileId, gameId, isNMM })
                 const res = await gmRequest('/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl', { method: 'POST', data: `fid=${encodeURIComponent(fileId)}&game_id=${encodeURIComponent(gameId)}${isNMM ? '&nmm=1' : ''}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest', Origin: 'https://www.nexusmods.com', Referer: href || spoof } })
                 if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge', blockedUrl: href || spoof }
@@ -399,7 +399,7 @@
                     if (!u.includes('downloadUrl')) continue
                     const fd = JSON.parse(u)
                     const dl = isNMM ? fd.vortexDownloadUrl || fd.downloadUrl : fd.downloadUrl
-                    if (dl) return dl
+                    if (dl && isUsableDownloadUrl(dl)) return dl
                 } catch (e) {}
             }
             return res.text.match(/https?:\/\/[a-zA-Z0-9-]+\.nexus-cdn\.com[^"']+/i)?.[0].replace(/&amp;/g, '&') || null
