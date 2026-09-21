@@ -1,0 +1,91 @@
+name: Bug report
+description: Report a problem with Nexus No Wait++
+title: "[Bug]: "
+labels:
+  - bug
+
+body:
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      placeholder: "Firefox 143.0"
+    validations:
+      required: true
+
+  - type: input
+    id: userscript-manager
+    attributes:
+      label: Userscript manager
+      placeholder: "Violentmonkey x.xx.x"
+    validations:
+      required: true
+
+  - type: input
+    id: script-version
+    attributes:
+      label: Nexus No Wait++ version
+      placeholder: "v1.2.3"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem clearly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: troubleshooting
+    attributes:
+      label: Troubleshooting attempted
+      description: What have you already tried, and what was the result?
+    validations:
+      required: true
+
+  - type: textarea
+    id: console-errors
+    attributes:
+      label: Console errors
+      description: Paste relevant browser console errors, or write "None".
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-information
+    attributes:
+      label: Additional information
+      description: Add any relevant screenshots, links, or other details.
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I am using the latest version of Nexus No Wait++.
+          required: true
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I have tried the troubleshooting steps.
+          required: true
