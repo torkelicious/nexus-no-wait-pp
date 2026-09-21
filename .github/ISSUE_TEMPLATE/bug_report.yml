@@ -49,13 +49,6 @@ body:
       required: true
 
   - type: textarea
-    id: expected
-    attributes:
-      label: Expected behaviour
-    validations:
-      required: true
-
-  - type: textarea
     id: troubleshooting
     attributes:
       label: Troubleshooting attempted
@@ -87,5 +80,5 @@ body:
           required: true
         - label: I searched existing issues for the same problem.
           required: true
-        - label: I have tried the troubleshooting steps.
+        - label: I have tried the [troubleshooting steps](https://github.com/torkelicious/nexus-no-wait-pp#troubleshooting).
           required: true
