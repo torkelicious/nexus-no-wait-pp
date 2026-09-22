@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.2.6
+// @version     2.2.7
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -254,7 +254,7 @@
         if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
         const h = u.hostname
         if (/(^|\.)nexus-cdn\.com$/.test(h)) return true
-        if (/(^|\.)nexusmods\.com$/.test(h)) return /^(filedelivery|download|cdn|dl)\./.test(h) || u.pathname.startsWith('/api/files/') || u.searchParams.has('file_id') || isRequirementsUrl(s)
+        if (/(^|\.)nexusmods\.com$/.test(h)) return u.pathname.startsWith('/api/files/') || u.searchParams.has('file_id') || isRequirementsUrl(s) || (u.searchParams.has('expires') && u.searchParams.has('user_id'))
         logEvent('debug', 'url:rejected', { url: s })
         return false
     }
