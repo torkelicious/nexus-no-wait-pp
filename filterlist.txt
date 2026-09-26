@@ -13,7 +13,7 @@ nexusmods.com##.mfp-ready.mfp-zoom-in.mfp-bg
 nexusmods.com##.sm\:block.p-4.bg-cover
 nexusmods.com##.to-premium-900
 nexusmods.com##.col-span-2 > .text-left
-nexusmods.com##.md\:block.hidden
+! nexusmods.com##.md\:block.hidden
 nexusmods.com##.border-creator-moderate.border.rounded-lg.block
 !!! https://greasyfork.org/en/scripts/519037-nexus-no-wait/discussions/336021
 nexusmods.com##free-trial-banner
