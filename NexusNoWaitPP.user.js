@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.2.7
+// @version     2.2.8
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -28,6 +28,8 @@
     // config / state
     const CONFIG_KEY = 'NexusNoWaitPP'
     const AUDIO_CACHE_KEY = 'NexusNoWaitPP_ErrorSoundCache'
+    const ERROR_RETRY_KEY = 'NexusNoWaitPP_ErrorPageRetry'
+    const ERROR_RETRY_DELAYS = [30000, 60000, 120000]
     const DEFAULTS = { AutoStartDownload: true, AutoCloseTab: true, VpnMode: false, SkipRequirements: true, ShowAlertsOnError: true, PlayErrorSound: true, ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/cf4fdca1cde74a173ac115e95eb1c8ffeb19a4ae/errorsound.mp3', HandleArchivedFiles: true, DownloadButtonColor: false, OverrideFileNames: false, ForceModManagerDownload: false, CloseTabDelay: 2000, RequestTimeout: 30000, RequestMethod: 'gm' }
 
     function loadConfig() {
@@ -65,6 +67,8 @@
         handledForceNmm = new WeakSet(),
         attachedSlowDl = new WeakSet()
     const autoFiredIds = new Set()
+    let errorRetryTimer = null,
+        errorRetryUrl = null
     let listenersAttached = false,
         errorAudioPlayer = null,
         domObserver = null,
@@ -424,6 +428,79 @@
         if (cfg.ShowAlertsOnError) alert(`Download error: ${msg}`)
     }
 
+    // standalone error template
+    const isNexusErrorPage = () => document.querySelector('body > h1')?.textContent.trim() === 'Something went wrong.' && [...document.querySelectorAll('body > div > p')].some(p => p.textContent.trim() === 'There seems to be an error. Please try again later.') && !!document.querySelector('a[href="https://nexusmods.statuspage.io/"], a[href="https://status.nexusmods.com"], a[href="https://status.nexusmods.com/"]')
+
+    function cancelErrorPageRetry(reset = false) {
+        clearTimeout(errorRetryTimer)
+        errorRetryTimer = errorRetryUrl = null
+        document.getElementById('nnwpp-error-recovery')?.remove()
+        if (reset === true) {
+            try {
+                sessionStorage.removeItem(ERROR_RETRY_KEY)
+            } catch {}
+        }
+    }
+
+    function showErrorPageRetryStatus(message) {
+        let notice = document.getElementById('nnwpp-error-recovery')
+        if (!notice) {
+            document.body.insertAdjacentHTML('beforeend', '<p id="nnwpp-error-recovery" role="status" style="margin:24px auto;padding:12px;max-width:640px;color:#fff;background:#29292e;border:1px solid #da8e35;line-height:1.5;"></p>')
+            notice = document.getElementById('nnwpp-error-recovery')
+        }
+        if (notice.textContent !== message) notice.textContent = message
+        return true
+    }
+
+    function recoverDownloadErrorPage() {
+        const url = location.href,
+            fileId = new URLSearchParams(location.search).get('file_id')
+        if (!cfg.AutoStartDownload || !isModPage() || !/^[1-9]\d*$/.test(fileId || '') || !isNexusErrorPage()) {
+            cancelErrorPageRetry(!!document.querySelector('mod-file-download'))
+            return false
+        }
+        if (errorRetryUrl === url) return true
+        cancelErrorPageRetry()
+        errorRetryUrl = url
+
+        const save = attempts => sessionStorage.setItem(ERROR_RETRY_KEY, JSON.stringify({ url, attempts }))
+        const fail = e => {
+            Logger.warn('Error-page recovery stopped:', e)
+            return showErrorPageRetryStatus('NNW++: Automatic recovery stopped because the retry count could not be saved. Please reload manually.')
+        }
+        let attempts
+        try {
+            const stored = JSON.parse(sessionStorage.getItem(ERROR_RETRY_KEY) || 'null')
+            attempts = stored?.url === url ? stored.attempts : 0
+            if (!Number.isInteger(attempts) || attempts < 0) throw new Error('Invalid retry count')
+            save(attempts)
+        } catch (e) {
+            return fail(e)
+        }
+
+        if (attempts >= ERROR_RETRY_DELAYS.length) return showErrorPageRetryStatus('NNW++: Nexus still shows an error after 3 automatic reloads. Automatic recovery has stopped; please try again later.')
+        const delay = ERROR_RETRY_DELAYS[attempts]
+        showErrorPageRetryStatus(`NNW++: Nexus returned an error. Reloading in ${delay / 1000} seconds (attempt ${attempts + 1}/${ERROR_RETRY_DELAYS.length}).`)
+        errorRetryTimer = setTimeout(() => {
+            errorRetryTimer = null
+            if (!cfg.AutoStartDownload || location.href !== url || !isNexusErrorPage()) return cancelErrorPageRetry()
+            try {
+                save(attempts + 1)
+            } catch (e) {
+                return fail(e)
+            }
+            location.reload()
+        }, delay)
+        return true
+    }
+
+    function isDownloadHandoffUrl(url) {
+        if (!isUsableDownloadUrl(url) || isRequirementsUrl(url)) return false
+        if (url.startsWith('nxm://')) return true
+        const target = new URL(url, location.href)
+        return /(^|\.)nexus-cdn\.com$/.test(target.hostname) || target.pathname.startsWith('/api/files/') || (target.searchParams.has('expires') && target.searchParams.has('user_id'))
+    }
+
     async function startDownloadFlow({ btn, fileId, isNMM, href, isAutoStart = false }) {
         if (btn) setButtonState(btn, 'waiting')
         logEvent('debug', isAutoStart ? 'download:auto-start' : 'download:start', { fileId, isNMM, href })
@@ -437,9 +514,10 @@
                 if (btn) setButtonState(btn, 'downloading')
                 location.assign(fallbackUrl)
                 if (btn) restoreButtonState(btn)
-                return
+                return false
             }
-            return handleError(btn || null, error)
+            handleError(btn || null, error)
+            return false
         }
         if (btn) setButtonState(btn, 'downloading')
         let finalUrl = await normalizeDownloadUrl(url, isNMM)
@@ -449,19 +527,27 @@
                 logEvent('info', 'Normalization failed in VPN Mode. Going to:', { fallbackUrl })
                 location.assign(fallbackUrl)
                 if (btn) restoreButtonState(btn)
-                return
+                return false
             }
-            return handleError(btn || null, 'Failed to resolve download URL')
+            handleError(btn || null, 'Failed to resolve download URL')
+            return false
         }
 
         if (isRequirementsUrl(finalUrl) && !cfg.SkipRequirements) {
             logEvent('info', 'Halting flow: File has requirements & SkipRequirements is false', { finalUrl })
-            return location.assign(finalUrl)
+            location.assign(finalUrl)
+            return false
         }
 
         if (cfg.SkipRequirements && !finalUrl.startsWith('nxm://') && finalUrl.includes('nexusmods.com') && (finalUrl.includes('file_id=') || /\/files\/\d+/i.test(finalUrl)) && !finalUrl.includes('GenerateDownloadUrl') && !finalUrl.includes('nexus-cdn.com')) {
             const dl = await scrapeDeepDownloadLink(finalUrl, isNMM)
             if (dl) finalUrl = dl.includes('/api/files/') || dl.includes('GenerateDownloadUrl') ? (await getDownloadUrl({ href: dl, gameId, isNMM }))?.url || dl : dl
+        }
+
+        if (!isDownloadHandoffUrl(finalUrl)) {
+            location.assign(finalUrl)
+            if (btn) restoreButtonState(btn)
+            return false
         }
 
         if (cfg.OverrideFileNames && typeof GM_download === 'function' && !isNMM && !finalUrl.startsWith('nxm://')) {
@@ -477,27 +563,29 @@
                     } catch (err) {
                         logEvent('warn', 'download: override fallback', err)
                         location.assign(finalUrl)
-                        return btn && restoreButtonState(btn)
+                        if (btn) restoreButtonState(btn)
+                        return true
                     }
                 }
                 const ext = name.lastIndexOf('.'),
                     idRegex = new RegExp(`(^|[^0-9])${modId}([^0-9]|$)`)
                 let nName = idRegex.test(name) ? name : ext !== -1 ? `${name.substring(0, ext)}-${modId}${name.substring(ext)}` : `${name}-${modId}`
-                GM_download({
-                    url: finalUrl,
-                    name: nName,
-                    saveAs: false,
-                    onload: () => btn && restoreButtonState(btn),
-                    onerror: () => {
-                        location.assign(finalUrl)
-                        btn && restoreButtonState(btn)
+                return new Promise(resolve => {
+                    const finish = started => {
+                        if (btn) restoreButtonState(btn)
+                        resolve(started)
                     }
+                    const fallback = () => {
+                        location.assign(finalUrl)
+                        finish(false)
+                    }
+                    GM_download({ url: finalUrl, name: nName, saveAs: false, onload: () => finish(true), onerror: fallback, ontimeout: fallback })
                 })
-                return
             }
         }
         location.assign(finalUrl)
         if (btn) restoreButtonState(btn)
+        return true
     }
 
     // click interception
@@ -586,15 +674,30 @@
     }
 
     // features
+    async function runAutoDownload(options) {
+        const pageUrl = location.href
+        try {
+            if (!(await startDownloadFlow({ ...options, isAutoStart: true })) || location.href !== pageUrl) return
+            cancelErrorPageRetry(true)
+            if (cfg.AutoCloseTab) setTimeout(() => cfg.AutoCloseTab && cfg.AutoStartDownload && location.href === pageUrl && !isNexusErrorPage() && window.close(), cfg.CloseTabDelay)
+        } catch (e) {
+            handleError(options.btn || null, String(e))
+        }
+    }
+
     async function autoStartDownload() {
         if (!cfg.AutoStartDownload || !isModPage() || (location.search.includes('tab=files') && !location.pathname.includes('/files/')) || document.querySelector('mod-file-download')) return
         const fileId = new URLSearchParams(location.search).get('file_id')
         if (!fileId || autoFiredIds.has(fileId)) return
         autoFiredIds.add(fileId)
 
+        const pageUrl = location.href
         await new Promise(r => setTimeout(r, 200))
-        await startDownloadFlow({ fileId, isNMM: isNMMDownload(null, location.search), href: location.href, isAutoStart: true })
-        if (cfg.AutoCloseTab) setTimeout(() => window.close(), cfg.CloseTabDelay)
+        if (!cfg.AutoStartDownload || location.href !== pageUrl || isNexusErrorPage()) {
+            autoFiredIds.delete(fileId)
+            return
+        }
+        await runAutoDownload({ fileId, isNMM: isNMMDownload(null, location.search), href: pageUrl })
     }
 
     function setupSlowDownloadIntercept() {
@@ -619,7 +722,7 @@
 
         if (cfg.AutoStartDownload && !autoFiredIds.has(fid)) {
             autoFiredIds.add(fid)
-            startDownloadFlow({ btn: slowBtn, fileId: fid, isNMM, href: location.href, isAutoStart: true }).then(() => cfg.AutoCloseTab && setTimeout(() => window.close(), cfg.CloseTabDelay))
+            runAutoDownload({ btn: slowBtn, fileId: fid, isNMM, href: location.href })
         }
     }
 
@@ -835,6 +938,8 @@
 
     // initialization
     function handleDomUpdates() {
+        if (recoverDownloadErrorPage()) return
+        autoStartDownload()
         archivedFileHandler()
         forceModManagerHandler()
         setupSlowDownloadIntercept()
@@ -853,7 +958,6 @@
             domObserver.observe(document.body, { childList: true, subtree: true })
             listenersAttached = true
         }
-        autoStartDownload()
         handleDomUpdates()
         logEvent('info', 'init', { url: location.href })
     }
@@ -877,6 +981,8 @@
         onNavigate()
     }
     window.addEventListener('popstate', onNavigate)
+    window.addEventListener('pagehide', cancelErrorPageRetry)
+    window.addEventListener('pageshow', handleDomUpdates)
 
     main()
 })()
