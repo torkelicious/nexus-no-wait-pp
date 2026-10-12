@@ -379,7 +379,10 @@
         return url
     }
 
-    async function scrapeDeepDownloadLink(pageUrl, isNMM) {
+    async function scrapeDeepDownloadLink(pageUrl, isNMM, fileId) {
+        const expectedFileId = String(fileId || extractFileId(pageUrl) || '')
+        // A files page can contain links for several files; never select the first one blindly.
+        if (!/^[1-9]\d*$/.test(expectedFileId)) return null
         try {
             const res = await gmRequest(pageUrl)
             const re = /(?:main-file|file)=(["'])(.*?)\1/gi
@@ -390,13 +393,18 @@
                         .replace(/&quot;/g, '"')
                         .replace(/&amp;/g, '&')
                         .replace(/&#34;/g, '"')
-                    if (!u.includes('downloadUrl')) continue
                     const fd = JSON.parse(u)
-                    const dl = isNMM ? fd.vortexDownloadUrl || fd.downloadUrl : fd.downloadUrl
-                    if (dl && isUsableDownloadUrl(dl)) return dl
+                    const values = isNMM ? [fd.vortexDownloadUrl, fd.nmmDownloadUrl, fd.downloadUrl] : [fd.downloadUrl]
+                    for (const value of values) {
+                        if (typeof value !== 'string') continue
+                        const dl = decodeDownloadUrlValue(value)
+                        const metadataFileId = String(fd.id ?? fd.fileId ?? extractFileId(dl) ?? '')
+                        if (metadataFileId === expectedFileId && isUsableDownloadUrl(dl, isNMM)) return dl
+                    }
                 } catch (e) {}
             }
-            return res.text.match(/https?:\/\/[a-zA-Z0-9-]+\.nexus-cdn\.com[^"']+/i)?.[0].replace(/&amp;/g, '&') || null
+            // An arbitrary CDN link does not prove which file (or download mode) it belongs to.
+            return null
         } catch {
             return null
         }
@@ -544,8 +552,8 @@
         }
 
         if (cfg.SkipRequirements && !finalUrl.startsWith('nxm://') && finalUrl.includes('nexusmods.com') && (finalUrl.includes('file_id=') || /\/files\/\d+/i.test(finalUrl)) && !finalUrl.includes('GenerateDownloadUrl') && !finalUrl.includes('nexus-cdn.com')) {
-            const dl = await scrapeDeepDownloadLink(finalUrl, isNMM)
-            if (dl) finalUrl = dl.includes('/api/files/') || dl.includes('GenerateDownloadUrl') ? (await getDownloadUrl({ href: dl, gameId, isNMM }))?.url || dl : dl
+            const dl = await scrapeDeepDownloadLink(finalUrl, isNMM, fileId || extractFileId(href || finalUrl))
+            if (dl) finalUrl = dl.includes('/api/files/') || dl.includes('GenerateDownloadUrl') ? (await getDownloadUrl({ href: dl, fileId: fileId || extractFileId(dl), gameId, isNMM }))?.url || dl : dl
         }
 
         if (!isDownloadHandoffUrl(finalUrl)) {
@@ -597,7 +605,7 @@
 
     function extractFileId(href) {
         try {
-            if (href.startsWith('nxm://')) return new URLSearchParams(href.slice(href.indexOf('?') + 1)).get('id') || null
+            if (href.startsWith('nxm://')) return href.match(/^nxm:\/\/[^/]+\/mods\/\d+\/files\/(\d+)(?:[?#]|$)/i)?.[1] || null
             const u = new URL(href, location.href)
             return u.searchParams.get('id') || u.searchParams.get('file_id') || u.pathname.match(/\/api\/files\/(\d+)/)?.[1] || null
         } catch {
