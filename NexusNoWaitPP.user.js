@@ -262,7 +262,11 @@
         if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
         const h = u.hostname
         if (/(^|\.)nexus-cdn\.com$/.test(h)) return isNMM !== true
-        if (/(^|\.)nexusmods\.com$/.test(h)) return u.pathname.startsWith('/api/files/') || u.searchParams.has('file_id') || isRequirementsUrl(s) || (u.searchParams.has('expires') && u.searchParams.has('user_id'))
+        if (/(^|\.)nexusmods\.com$/.test(h)) {
+            const nmm = u.searchParams.get('nmm')
+            if ((isNMM === false && nmm === '1') || (isNMM === true && nmm === '0')) return false
+            return u.pathname.startsWith('/api/files/') || u.searchParams.has('file_id') || isRequirementsUrl(s) || (u.searchParams.has('expires') && u.searchParams.has('user_id'))
+        }
         logEvent('debug', 'url:rejected', { url: s })
         return false
     }
