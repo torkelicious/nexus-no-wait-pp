@@ -219,17 +219,21 @@
             .trim()
     }
 
-    function parseDownloadURLFromResponse(text) {
+    function parseDownloadURLFromResponse(text, isNMM) {
         if (!text) return null
         const raw = String(text)
         try {
             const j = JSON.parse(raw)
-            const url = j?.downloadUrl || j?.url || j?.vortexDownloadUrl || j?.nmmDownloadUrl || j?.data?.url
-            if (url) return { url: decodeDownloadUrlValue(url) }
+            const values = isNMM ? [j?.vortexDownloadUrl, j?.nmmDownloadUrl, j?.url, j?.data?.url, j?.downloadUrl] : [j?.downloadUrl, j?.url, j?.data?.url]
+            const url = values.filter(v => typeof v === 'string').map(decodeDownloadUrlValue).find(v => isUsableDownloadUrl(v, isNMM))
+            if (url) return { url }
         } catch {}
         for (const re of [/id=["']dl_link["'][^>]*value=["']([^"']+)["']/i, /data-download-url=["']([^"']+)["']/i, /const\s+downloadUrl\s*=\s*["']([^"']+)["']/i]) {
             const m = raw.match(re)
-            if (m) return { url: decodeDownloadUrlValue(m[1]) }
+            if (m) {
+                const url = decodeDownloadUrlValue(m[1])
+                if (isUsableDownloadUrl(url, isNMM)) return { url }
+            }
         }
         return null
     }
@@ -245,10 +249,10 @@
         return p.has('key') && p.has('expires') && p.has('user_id') ? m[0] : null
     }
 
-    function isUsableDownloadUrl(url) {
+    function isUsableDownloadUrl(url, isNMM = null) {
         if (!url) return false
         const s = String(url)
-        if (s.startsWith('nxm://')) return !!parseDownloadLink(s)
+        if (s.startsWith('nxm://')) return isNMM !== false && !!parseDownloadLink(s)
         let u
         try {
             u = new URL(s, location.href)
@@ -257,7 +261,7 @@
         }
         if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
         const h = u.hostname
-        if (/(^|\.)nexus-cdn\.com$/.test(h)) return true
+        if (/(^|\.)nexus-cdn\.com$/.test(h)) return isNMM !== true
         if (/(^|\.)nexusmods\.com$/.test(h)) return u.pathname.startsWith('/api/files/') || u.searchParams.has('file_id') || isRequirementsUrl(s) || (u.searchParams.has('expires') && u.searchParams.has('user_id'))
         logEvent('debug', 'url:rejected', { url: s })
         return false
@@ -313,8 +317,8 @@
         if (href?.startsWith('nxm://')) return parseDownloadLink(href) ? { url: href } : { url: null, error: 'Invalid nxm link' }
 
         const extract = r => {
-            const candidates = [r.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i)?.[1], parseDownloadURLFromResponse(r.text)?.url, parseDownloadLink(r.text), parseDownloadLink(r.finalUrl)]
-            const link = candidates.find(isUsableDownloadUrl) || null
+            const candidates = [r.headers.match(/Location:\s*(nxm:\/\/[^\s]+)/i)?.[1], parseDownloadURLFromResponse(r.text, isNMM)?.url, parseDownloadLink(r.text), parseDownloadLink(r.finalUrl)]
+            const link = candidates.find(url => isUsableDownloadUrl(url, isNMM)) || null
             if (!link && candidates.some(Boolean)) logEvent('debug', 'download:link-rejected', { candidates: candidates.filter(Boolean) })
             return link
         }
@@ -328,7 +332,7 @@
             try {
                 absolute = new URL(target, location.href).href
             } catch {}
-            const link = (res.finalUrl !== target && res.finalUrl !== absolute && isUsableDownloadUrl(res.finalUrl) ? res.finalUrl : null) || extract(res)
+            const link = (res.finalUrl !== target && res.finalUrl !== absolute && isUsableDownloadUrl(res.finalUrl, isNMM) ? res.finalUrl : null) || extract(res)
             if (link) return { url: link }
         }
 
