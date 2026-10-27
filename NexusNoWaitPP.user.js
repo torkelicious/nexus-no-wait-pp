@@ -354,14 +354,22 @@
             if (link) return { url: link }
         }
 
-        if (isNMM && href) {
+        let isDirectFile = false
+        try {
+            isDirectFile = /(^|\.)nexus-cdn\.com$/i.test(new URL(href, location.href).hostname)
+        } catch {}
+        if (isNMM && href && !isDirectFile) {
             const target = appendNmmParam(href)
             const res = await gmRequest(target, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
             if (isCloudflareChallenge(res)) return { url: null, error: 'cloudflare-challenge', blockedUrl: target }
             let link = extract(res)
             if (!link && isRequirementsUrl(target)) {
                 const rm = res.text.match(/href=["']([^"']*?file_id[^"']*?)["']/i)
-                if (rm) link = extract(await gmRequest(rm[1]))
+                if (rm) {
+                    const followUp = await gmRequest(rm[1])
+                    if (isCloudflareChallenge(followUp)) return { url: null, error: 'cloudflare-challenge', blockedUrl: rm[1] }
+                    link = extract(followUp)
+                }
             }
             if (link) return { url: link }
         }
@@ -654,7 +662,11 @@
                 if (modal) {
                     try {
                         const fd = JSON.parse(modal.getAttribute('file') || '{}')
-                        if (fd.downloadUrl) secureApiUrl = isNMM ? fd.vortexDownloadUrl || fd.downloadUrl : fd.downloadUrl
+                        const candidate = isNMM ? fd.vortexDownloadUrl || fd.downloadUrl : fd.downloadUrl
+                        // a direct nexus-cdn.com link is not a resolvable endpoint
+                        try {
+                            if (candidate && !/(^|\.)nexus-cdn\.com$/i.test(new URL(candidate, location.href).hostname)) secureApiUrl = candidate
+                        } catch (e) {}
                     } catch (e) {}
                 }
 
