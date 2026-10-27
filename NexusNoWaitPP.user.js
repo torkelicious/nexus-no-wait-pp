@@ -128,9 +128,20 @@
     }
 
     function isCloudflareChallenge(res) {
-        if (!res?.text) return false
-        if (/cf-turnstile|challenges\.cloudflare\.com|Just a moment|Attention Required!|cf-error-details|id="challenge-form"|cf-browser-verification|window\._cf_chl_opt/i.test(res.text)) return true
-        return (res.status === 403 || res.status === 503) && /cf-ray|server:\s*cloudflare/i.test(res.headers) && res.text.trim().startsWith('<')
+        if (!res) return false
+        // cf-mitigated identifies a challenge; cf-ray/server only identify Cloudflare.
+        if (/(?:^|\r?\n)cf-mitigated:[\t ]*challenge[\t ]*(?:\r?\n|$)/i.test(res.headers || '')) return true
+
+        const text = String(res.text || '').trim()
+        if (!text) return false
+        // Filenames and other JSON data may contain challenge-like words.
+        try {
+            JSON.parse(text)
+            return false
+        } catch {}
+
+        // Passive JS detection and embedded Turnstile widgets also appear on normal pages.
+        return /cf-chl-interstitial|id\s*=\s*["']challenge-form["']|cf-browser-verification|window\._cf_chl_opt|challenge-platform\/h\/[\w-]+\/orchestrate\//i.test(text) || /<title\b[^>]*>\s*(?:just a moment[.!\u2026]*|attention required!?\s*(?:\||[-\u2013\u2014])?\s*cloudflare)\s*<\/title>/i.test(text)
     }
 
     // audio setup
