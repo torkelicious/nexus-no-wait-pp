@@ -631,7 +631,12 @@
 
     function extractFileId(href) {
         try {
-            if (/^nxm:\/\//i.test(href)) return href.match(/^nxm:\/\/[^/]+\/mods\/\d+\/files\/(\d+)(?:[?#]|$)/i)?.[1] || null
+            if (/^nxm:\/\//i.test(href)) {
+                const m = href.match(/^nxm:\/\/[^?#]*\/files\/([1-9]\d*)(?:[?#]|\/?$)/i)
+                if (m) return m[1]
+                const q = new URLSearchParams(href.slice(href.indexOf('?') + 1))
+                return q.get('file_id') || q.get('id') || null
+            }
             const u = new URL(href, location.href)
             return u.searchParams.get('id') || u.searchParams.get('file_id') || u.pathname.match(/\/api\/files\/(\d+)/)?.[1] || u.pathname.match(/\/files\/(\d+)(?:\.json)?$/)?.[1] || null
         } catch {
