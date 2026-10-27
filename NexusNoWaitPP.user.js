@@ -1,7 +1,6 @@
 // ==UserScript==
 // @name        Nexus No Wait ++
 // @description Skip Countdown, Auto Download, and More for Nexus Mods. Supports (Manual/Vortex/MO2/NMM)
-// @version     2.2.8
 // @namespace   NexusNoWaitPlusPlus
 // @author      Torkelicious
 // @iconURL     https://raw.githubusercontent.com/torkelicious/nexus-no-wait-pp/refs/heads/main/icon.png
@@ -236,7 +235,10 @@
         try {
             const j = JSON.parse(raw)
             const values = isNMM ? [j?.vortexDownloadUrl, j?.nmmDownloadUrl, j?.url, j?.data?.url, j?.downloadUrl] : [j?.downloadUrl, j?.url, j?.data?.url]
-            const url = values.filter(v => typeof v === 'string').map(decodeDownloadUrlValue).find(v => isUsableDownloadUrl(v, isNMM))
+            const url = values
+                .filter(v => typeof v === 'string')
+                .map(decodeDownloadUrlValue)
+                .find(v => isUsableDownloadUrl(v, isNMM))
             if (url) return { url }
         } catch {}
         for (const re of [/id=["']dl_link["'][^>]*value=["']([^"']+)["']/i, /data-download-url=["']([^"']+)["']/i, /const\s+downloadUrl\s*=\s*["']([^"']+)["']/i]) {
