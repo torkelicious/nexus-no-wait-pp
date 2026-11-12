@@ -41,3 +41,7 @@ nexusmods.com###rj-vortex
 
 !!! Profile menu clutter (premium upsell button)
 nexusmods.com###head > div.rj-right-tray.rj-profile-tray.rj-open > ul > li.user-profile-menu-section-top > a
+
+!!! Premium / Vortex ad upsell in file download popup
+nexusmods.com##div.space-y-2.px-3.pt-3:has(> div > p > a[href*="/account/billing/premium"]):has(> div > p > a[href="/vortex"])
+nexusmods.com##div.space-y-2.px-3.pt-3:has(> div > p > a[href*="/account/billing/premium"])
