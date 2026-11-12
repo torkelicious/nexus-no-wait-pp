@@ -30,7 +30,7 @@
     const AUDIO_CACHE_KEY = 'NexusNoWaitPP_ErrorSoundCache'
     const ERROR_RETRY_KEY = 'NexusNoWaitPP_ErrorPageRetry'
     const ERROR_RETRY_DELAYS = [30000, 60000, 120000]
-    const DEFAULTS = { AutoStartDownload: true, AutoCloseTab: true, VpnMode: false, SkipRequirements: true, ShowAlertsOnError: true, PlayErrorSound: true, ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/cf4fdca1cde74a173ac115e95eb1c8ffeb19a4ae/errorsound.mp3', HandleArchivedFiles: true, DownloadButtonColor: false, OverrideFileNames: false, ForceModManagerDownload: false, CloseTabDelay: 2000, RequestTimeout: 30000, RequestMethod: 'gm' }
+    const DEFAULTS = { AutoStartDownload: true, AutoCloseTab: true, VpnMode: false, ChallengeRetry: true, SkipRequirements: true, ShowAlertsOnError: true, PlayErrorSound: true, ErrorSoundUrl: 'https://github.com/torkelicious/nexus-no-wait-pp/raw/cf4fdca1cde74a173ac115e95eb1c8ffeb19a4ae/errorsound.mp3', HandleArchivedFiles: true, DownloadButtonColor: false, OverrideFileNames: false, ForceModManagerDownload: false, CloseTabDelay: 2000, RequestTimeout: 30000, RequestMethod: 'gm' }
 
     function loadConfig() {
         try {
@@ -98,12 +98,16 @@
         }
     }
 
-    function gmRequest(url, opts = {}) {
-        if (cfg.RequestMethod === 'fetch') {
-            try {
-                if (new URL(url, location.href).hostname === location.hostname) return fetchRequest(url, opts)
-            } catch {}
+    function isSameOrigin(url) {
+        try {
+            return new URL(url, location.href).hostname === location.hostname
+        } catch {
+            return false
         }
+    }
+
+    // background request via the userscript manager
+    function gmXhr(url, opts = {}) {
         return new Promise(resolve => {
             if (!gmXmlHttpRequest) return resolve({ text: '', finalUrl: '', headers: '', status: 0 })
             const done = r => resolve({ text: r?.responseText || '', finalUrl: r?.finalUrl || '', headers: r?.responseHeaders || '', status: r?.status || 0 })
@@ -124,6 +128,22 @@
                     done()
                 }
             })
+        })
+    }
+
+    function gmRequest(url, opts = {}) {
+        if (cfg.RequestMethod === 'fetch' && isSameOrigin(url)) return fetchRequest(url, opts)
+        return gmXhr(url, opts).then(res => {
+            // kind of a last ditch fallback;
+            // users can get a cf-mitigated: challenge back. then retry the same request once in-page
+            if (cfg.ChallengeRetry && res?.status !== 0 && isSameOrigin(url) && isCloudflareChallenge(res)) {
+                logEvent('warn', 'network:challenge-retry', { url })
+                const headers = { ...(opts.headers || {}) }
+                delete headers.Origin
+                delete headers.Referer
+                return fetchRequest(url, { ...opts, headers })
+            }
+            return res
         })
     }
 
@@ -857,6 +877,7 @@
                 ],
                 description: "How the script talks to Nexus to resolve download links. Native Fetch uses your browser's own network stack instead of a background request, which may fix Cloudflare-challenge/VPN-related errors for some users. Only applies to nexusmods.com requests."
             },
+            { key: 'ChallengeRetry', label: 'Auto-Retry Challenges In-Page', type: 'bool', description: "If a background request hits a Cloudflare challenge, silently retry it once in-page so your browser's own clearance applies. Fixes most VPN-related download errors without changing any other settings." },
             { key: 'SkipRequirements', label: 'Skip Requirements PopUp/Tab', type: 'bool', description: 'Skip the requirements popup/page and proceed directly to download' },
             { key: 'ShowAlertsOnError', label: 'Show Alert Messages on Errors', type: 'bool', description: 'Display error messages as browser popup alerts' },
             { key: 'PlayErrorSound', label: 'Play Error Sound', type: 'bool', description: 'Play an error sound when download errors occur' },
